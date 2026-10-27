@@ -1,0 +1,16 @@
+runtime/
+.env
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+.next/
+.pytest_cache/
+*.tsbuildinfo
+playwright-results/
+.open-next/
+.wrangler/
+.dev.vars
+.dev.vars.*
+.env.*
+!.env.example

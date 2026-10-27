@@ -1,0 +1,26 @@
+{
+  "name": "bg-ecosystem-portal",
+  "private": true,
+  "version": "0.1.1",
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "build:cloudflare": "opennextjs-cloudflare build",
+    "start": "next start --hostname 0.0.0.0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opennextjs/cloudflare": "1.20.13",
+    "next": "16.4.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "playwright": "^1.56.1",
+    "typescript": "^5.9.0",
+    "wrangler": "4.153.0"
+  }
+}

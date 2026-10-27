@@ -1,0 +1,18 @@
+{
+  "status": "PASS",
+  "runtime": "cloudflare-workerd",
+  "diagnostic": {
+    "portal": "ok",
+    "backend_configured": false,
+    "backend_connectivity": "not_checked",
+    "mode": "SANDBOX",
+    "production_enabled": false
+  },
+  "checks": [
+    "GET /api/auth/me => 503, no session",
+    "POST /api/auth/login => 503, no session",
+    "GET /api/public/verify/invalid-token => 503, no session"
+  ],
+  "browser_unavailable_message": "PASS",
+  "uncaught_browser_errors": []
+}

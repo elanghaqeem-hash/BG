@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: bg_sandbox
+      POSTGRES_USER: bg_sandbox
+      POSTGRES_PASSWORD: ${BG_DB_PASSWORD:?Set BG_DB_PASSWORD in .env}
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bg_sandbox -d bg_sandbox"]
+      interval: 3s
+      retries: 30
+  temporal:
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/var/lib/temporal/sandbox.db"]
+    volumes: ["temporal_data:/var/lib/temporal"]
+  api:
+    build: {context: ., dockerfile: Dockerfile.api}
+    environment: &api_env
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://bg_sandbox:${BG_DB_PASSWORD}@postgres/bg_sandbox
+      BG_ENCRYPTION_KEY: ${BG_ENCRYPTION_KEY:?Set BG_ENCRYPTION_KEY in .env}
+      BG_ALLOWED_ORIGINS: http://localhost:3000
+      BG_PUBLIC_WEB_URL: http://localhost:3000
+      TEMPORAL_ADDRESS: temporal:7233
+    depends_on:
+      postgres: {condition: service_healthy}
+    ports: ["127.0.0.1:8000:8000"]
+    volumes: ["runtime_data:/app/runtime"]
+  worker:
+    build: {context: ., dockerfile: Dockerfile.api}
+    environment: *api_env
+    command: ["python", "-m", "bg.worker"]
+    restart: on-failure
+    depends_on: [api, temporal]
+  web:
+    build: ./frontend
+    environment:
+      BG_API_INTERNAL_URL: http://api:8000
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [api]
+volumes:
+  postgres_data:
+  temporal_data:
+  runtime_data:
