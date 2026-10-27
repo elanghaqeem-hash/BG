@@ -1,0 +1,27 @@
+{
+  "status": "PASS",
+  "checks": [
+    "desktop_login_render",
+    "principal_login",
+    "create_draft_through_ui",
+    "evidence_upload_through_ui",
+    "independent_document_verification",
+    "mpo_portal",
+    "penjamin_portal",
+    "obligee_portal",
+    "broker_portal",
+    "fake_qr_browser",
+    "android_viewport_393_no_overflow",
+    "mobile_long_form_usable",
+    "no_uncaught_browser_errors"
+  ],
+  "mobile_layout": {
+    "innerWidth": 393,
+    "clientWidth": 393,
+    "scrollWidth": 393
+  },
+  "viewport_desktop": "1440x1000",
+  "viewport_mobile": "393x852",
+  "real_android_device": false,
+  "runtime": "cloudflare-workerd"
+}

@@ -1,0 +1,20 @@
+{
+  "name": "bg-ecosystem",
+  "version": "0.1.1",
+  "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "npm --prefix frontend ci && npm --prefix frontend run build:cloudflare",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev",
+    "check:deploy": "wrangler deploy --dry-run",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "typecheck": "npm --prefix frontend run typecheck",
+    "cf-typegen": "wrangler types --config frontend/wrangler.jsonc --env-interface CloudflareEnv --include-runtime=false worker-configuration.d.ts"
+  },
+  "devDependencies": {
+    "wrangler": "4.153.0"
+  }
+}

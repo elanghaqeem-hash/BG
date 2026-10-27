@@ -1,0 +1,36 @@
+name: BG MVP checks
+on: [push, pull_request]
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: bg_disposable_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_only_no_real_credentials
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U test_user -d bg_disposable_test" --health-interval 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r backend/requirements.txt
+      - run: python -m pytest backend/tests -q --junitxml=evidence/ci-sqlite.xml
+      - run: python -m pytest backend/tests -q --junitxml=evidence/ci-postgresql.xml
+        env:
+          BG_TEST_DATABASE_URL: postgresql+psycopg://test_user:test_only_no_real_credentials@localhost/bg_disposable_test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: backend-test-results, path: "evidence/ci-*.xml"}
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "22", cache: npm, cache-dependency-path: "**/package-lock.json"}
+      - run: npm ci
+      - run: npm test
+      - run: npm run check:deploy
+      - run: npm --prefix frontend run typecheck

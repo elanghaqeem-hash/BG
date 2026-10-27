@@ -1,0 +1,301 @@
+{
+  "name": "PKS sandbox v1",
+  "assumption": true,
+  "effective_from": "2026-01-01",
+  "effective_to": "2035-01-01",
+  "rules": {
+    "BR-01": {
+      "assert": {
+        "op": "truthy",
+        "field": "default_or_justified"
+      },
+      "message": "Pilih produk default atau berikan justifikasi skema alternatif",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "default_product": "BG_CONTRA"
+    },
+    "BR-02": {
+      "assert": {
+        "op": "truthy",
+        "field": "sp2_valid"
+      },
+      "message": "SP2KBG rekanan aktif dan sesuai revisi diperlukan",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli"
+    },
+    "BR-03": {
+      "assert": {
+        "op": "truthy",
+        "field": "eligible"
+      },
+      "message": "Kategori obligee belum eligible",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "eligible_categories": [
+        "APBN",
+        "APBD",
+        "BUMN",
+        "BUMD",
+        "ANAK_USAHA_BUMN",
+        "ANAK_USAHA_BUMD",
+        "JV",
+        "SWASTA_NASIONAL"
+      ]
+    },
+    "BR-04": {
+      "assert": {
+        "op": "truthy",
+        "field": "committee_complete"
+      },
+      "message": "Persetujuan Komite yang diwajibkan belum lengkap",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "exempt_categories": [
+        "APBN",
+        "APBD",
+        "BUMN",
+        "BUMD",
+        "ANAK_USAHA_BUMN",
+        "ANAK_USAHA_BUMD"
+      ],
+      "threshold": "3000000000",
+      "lower_role": "GH_BISNIS",
+      "upper_role": "DIREKSI"
+    },
+    "BR-05": {
+      "assert": {
+        "op": "truthy",
+        "field": "slik_current"
+      },
+      "message": "SLIK wajib Kol 1 dan ditarik pada bulan penerbitan",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "allowed_collectibility": [
+        1
+      ],
+      "same_month": true,
+      "timezone": "Asia/Jakarta"
+    },
+    "BR-06": {
+      "assert": {
+        "op": "truthy",
+        "field": "documents_complete"
+      },
+      "message": "Checklist PKS atau cakupan SP2KBG belum lengkap",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "required_documents": [
+        "NIB",
+        "CONTRACT"
+      ],
+      "sp2_coverage_allowed": true,
+      "nonwaivable": [
+        "NIB"
+      ]
+    },
+    "BR-07": {
+      "assert": {
+        "op": "truthy",
+        "field": "format_approved"
+      },
+      "message": "Format khusus harus disetujui penjamin",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "original_business_days": 5,
+      "accepted_states": [
+        "APPROVED_SCAN",
+        "ORIGINAL_RECEIVED"
+      ]
+    },
+    "BR-08": {
+      "assert": {
+        "op": "truthy",
+        "field": "format_hash_matches"
+      },
+      "message": "Persetujuan format tidak cocok dengan hash draft",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli"
+    },
+    "BR-09": {
+      "assert": {
+        "op": "truthy",
+        "field": "nib_present"
+      },
+      "message": "NIB wajib; TDP tidak menggantikan NIB",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "accepted_license": "NIB",
+      "rejected_substitute": "TDP"
+    },
+    "BR-10": {
+      "assert": {
+        "op": "truthy",
+        "field": "principal_office_request"
+      },
+      "message": "Surat Principal untuk kantor penerbit belum ada",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli"
+    },
+    "BR-11": {
+      "assert": {
+        "op": "truthy",
+        "field": "mkp_interoffice"
+      },
+      "message": "MKP wajib memuat penerbitan antar kantor",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli"
+    },
+    "BR-12": {
+      "assert": {
+        "op": "truthy",
+        "field": "ememo_complete"
+      },
+      "message": "E-Memo tujuan tembusan atau lampiran belum lengkap",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "to": "PEMIMPIN_PENERBIT",
+      "cc": [
+        "GH_BISNIS",
+        "KADEP_SUPPORT",
+        "MPO_PEMROSES",
+        "MPO_PENERBIT"
+      ],
+      "attachments": [
+        "PRINCIPAL_REQUEST",
+        "MKP",
+        "DRAFT_BG"
+      ]
+    },
+    "BR-13": {
+      "assert": {
+        "op": "truthy",
+        "field": "split_correct"
+      },
+      "message": "Perhitungan split tidak sesuai kebijakan",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "rate": "0.25",
+      "cap": "5000000",
+      "basis": "BOOKED_ADMIN_INCOME",
+      "currency": "IDR"
+    },
+    "BR-14": {
+      "assert": {
+        "op": "truthy",
+        "field": "split_timely"
+      },
+      "message": "Distribusi melewati satu hari kerja",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "business_days": 1
+    },
+    "BR-15": {
+      "assert": {
+        "op": "truthy",
+        "field": "signer_authorized"
+      },
+      "message": "Pejabat tidak berwenang pada Kantor Penerbit",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "signers": {
+        "CABANG": [
+          "MPO"
+        ],
+        "BISNIS_AREA": [
+          "SUPPORT"
+        ],
+        "KPO": [
+          "KADEP_SUPPORT",
+          "MPO_KPO"
+        ]
+      }
+    },
+    "BR-16": {
+      "assert": {
+        "op": "truthy",
+        "field": "portfolio_owned"
+      },
+      "message": "Pemilik portofolio harus Kantor Pemroses",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli"
+    },
+    "BR-17": {
+      "assert": {
+        "op": "truthy",
+        "field": "claim_submitter_authorized"
+      },
+      "message": "Pengaju klaim kontra tidak berwenang",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "submitters": {
+        "CABANG": [
+          "MPO"
+        ],
+        "BISNIS_AREA": [
+          "SUPPORT"
+        ],
+        "KPO": [
+          "SUPPORT"
+        ]
+      }
+    },
+    "BR-18": {
+      "assert": {
+        "op": "truthy",
+        "field": "claim_report_timely"
+      },
+      "message": "Laporan klaim melewati satu hari kerja",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "business_days": 1,
+      "recipients": [
+        "SUPPORT_OR_MPO",
+        "PENGEMBANGAN_BISNIS"
+      ]
+    },
+    "BR-19": {
+      "assert": {
+        "op": "truthy",
+        "field": "monitoring_assigned"
+      },
+      "message": "Monitoring unit bisnis belum ditugaskan",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "owner": "UNIT_BISNIS",
+      "cc": "PENGEMBANGAN_BISNIS"
+    },
+    "BR-20": {
+      "assert": {
+        "op": "truthy",
+        "field": "litigation_routed"
+      },
+      "message": "Klaim ditolak ditunda atau sengketa wajib dirujuk Litigasi",
+      "source": "Ringkasan SE dalam prompt; perlu dokumen asli",
+      "triggers": [
+        "REJECTED",
+        "DEFERRED",
+        "PROBLEMATIC_DISPUTE"
+      ],
+      "resolutions": [
+        "PAID",
+        "WITHDRAWN"
+      ]
+    }
+  },
+  "calendar": {
+    "timezone": "Asia/Jakarta",
+    "working_days": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "holidays": [],
+    "cutoff": "17:00"
+  },
+  "pks": {
+    "types": [
+      "PENAWARAN",
+      "PELAKSANAAN",
+      "UANG_MUKA",
+      "PEMELIHARAAN",
+      "PEMBAYARAN",
+      "KEPABEANAN",
+      "LAINNYA"
+    ],
+    "coverage": "100",
+    "max_tenor_days": 365,
+    "partner_limit": "100000000000",
+    "principal_limit": "10000000000",
+    "claim_window_days": 30,
+    "submit_business_days": 5,
+    "payment_business_days": 15,
+    "media": "PORTAL_SANDBOX",
+    "admin_fee": "1000000",
+    "ijp": "500000",
+    "broker_commission": "100000",
+    "dps_reference": "TEST_ONLY_NOT_DPS_APPROVAL"
+  }
+}
