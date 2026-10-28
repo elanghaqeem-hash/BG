@@ -56,7 +56,7 @@ function clean(r:Row) {
   return {id:r.id,application_id:r.application_id,kind:r.kind,status:r.status,
     proposed:r.proposed,requested_at:r.requested_at,
     reviewed_at:r.reviewed_at||null, partner_at:r.partner_at||null,
-    approved_at:r.approved_at||null,
+    approved_at:r.approved_at||null,approved_roles:r.approved_roles||[],
     mode:"SANDBOX",effective:false};
 }
 export function servicingListing(svc:Service,actor:Data,a:Row) {
@@ -142,6 +142,7 @@ export function approveServicing(svc:Service,actor:Data,a:Row,x:Data) {
     role:actor.role,actor:actor.id,at:svc.iso,
     fingerprint:hash({baseline:r.baseline_fingerprint,proposed:r.proposed,partner:r.counter_endorsement.digest}),
     mode:"SANDBOX"});
+  r.approved_roles=[...prior.map(q=>q.role),actor.role];
   if(!requisite.every(k=>k===actor.role||prior.some(q=>q.role===k)))return clean(r);
   // Reserve only the incremental amount; the original issued BG already consumes limit.
   const delta=money(targetAmount(r,a))-money(a.amount);
@@ -163,6 +164,7 @@ export function approveServicing(svc:Service,actor:Data,a:Row,x:Data) {
       mode:"SANDBOX_PRE_ISSUANCE"});
     r.limit_reservation_id=reservation.id;
   }
+  r.approved_roles=[...prior.map(q=>q.role),actor.role];
   r.approved_at=svc.iso;
   r.status="APPROVED_PENDING_ISSUANCE";
   // The original BG, amount, expiry, QR, claim deadline and number are untouched.
