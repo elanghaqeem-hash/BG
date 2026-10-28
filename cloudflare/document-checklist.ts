@@ -6,7 +6,7 @@
  * bukan angka kelengkapan tampilan ini, sampai governance menyetujui mapping
  * persyaratan final. Tidak melakukan validasi isi dokumen/OCR.
  */
-type Evidence = {kind: string; verified: boolean; created_at?: string; id?: string};
+type Evidence = {id: string; kind?: string; verified?: boolean; created_at?: string; [key: string]: unknown};
 type Application = Record<string, unknown>;
 type Requirement = {
   kind: string;
