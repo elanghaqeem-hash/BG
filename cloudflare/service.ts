@@ -22,6 +22,8 @@ import {
 import { buildDocumentChecklist } from "./document-checklist.ts";
 import { recordFiveC, reviewFiveC, counterReview, registerCollateral, approveCollateral,
   reserveCapacity, capacity, requestServicing, requestClosure, confirmClosure } from "./enterprise-controls.ts";
+import {reviewServicing, partnerEndorse, approveServicing, rejectServicing,
+  withdrawServicing, cancelApprovedServicing} from "./servicing-engine.ts";
 export const BANK = new Set([
   "AO",
   "ANALYST",
@@ -647,6 +649,24 @@ export class Service {
       case "request_servicing":
         requestServicing(this,actor,a,x);
         break;
+      case "review_servicing":
+        reviewServicing(this,actor,a,x);
+        break;
+      case "partner_endorse":
+        partnerEndorse(this,actor,a,x);
+        break;
+      case "approve_servicing":
+        approveServicing(this,actor,a,x);
+        break;
+      case "reject_servicing":
+        rejectServicing(this,actor,a,x);
+        break;
+      case "withdraw_servicing":
+        withdrawServicing(this,actor,a,x);
+        break;
+      case "cancel_approved_servicing":
+        cancelApprovedServicing(this,actor,a,x);
+        break;
       case "request_bg_closure":
         requestClosure(this,actor,a,x);
         break;
@@ -1133,12 +1153,14 @@ export class Service {
       };
     const a = this.s.get("applications", g.id),
       today = jakartaDate(this.now),
-      valid = a.issue_on <= today && today <= a.expires_on;
+      valid = g.status!=="CLOSED" && a.state!=="CLOSED" &&
+        a.issue_on <= today && today <= a.expires_on;
     return {
       authentic: true,
       valid,
       status: valid
         ? "AUTHENTIC_ACTIVE"
+        : g.status==="CLOSED" || a.state==="CLOSED" ? "AUTHENTIC_CLOSED"
         : today > a.expires_on
           ? "AUTHENTIC_EXPIRED"
           : "NOT_YET_EFFECTIVE",
@@ -1151,7 +1173,7 @@ export class Service {
       principal: this.s.get("parties", a.principal).name,
       obligee: this.s.get("parties", a.obligee).name,
       expires_on: a.expires_on,
-      claim_window_open: this.now <= timestamp(g.claim_deadline),
+      claim_window_open: g.status!=="CLOSED" && this.now <= timestamp(g.claim_deadline),
       mode: "SANDBOX",
     };
   }
