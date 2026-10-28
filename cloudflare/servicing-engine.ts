@@ -48,7 +48,8 @@ function projectCheck(svc:Service,a:Row,r:Row) {
 }
 function latestAfter(svc:Service,a:Row,r:Row,kind:string):Row {
   const d=svc.latest(a,kind);
-  req(timestamp(d.created_at)>=timestamp(r.requested_at),"DOCUMENT",
+  req(timestamp(d.created_at)>=timestamp(r.requested_at) &&
+      d.id!==r.baseline_document_ids?.[kind],"DOCUMENT",
     "Dokumen "+kind+" harus diperbarui setelah permintaan perubahan",409);
   return d;
 }
