@@ -66,7 +66,7 @@ export function recordVisit(svc:Service,actor:Data,a:Row,x:Data) {
     x.photo_categories.length>=1 &&
     x.photo_categories.length<=6 &&
     new Set(x.photo_categories).size===x.photo_categories.length &&
-    x.photo_categories.every((v:unknown)=>PHOTO_CATEGORIES.includes(v)),
+    x.photo_categories.every((v:unknown)=>typeof v==="string" && PHOTO_CATEGORIES.some(k=>k===v)),
     "VISIT","Kategori foto wajib berasal dari enam kategori LKN");
   req(x.attested===true,"VISIT",
     "RM wajib menyatakan hasil kunjungan dicatat sesuai kondisi sebenarnya");
