@@ -1074,3 +1074,128 @@ test("no-op amendment cannot advance even with a verified request",async()=>{
   assert.equal(new Store(f.db).rows("servicing").length,0);
   f.sqlite.close();
 });
+
+
+function visitData(photo_document,changes={}){
+ return {
+  visited_at:"2026-10-28T06:00:00Z",
+  customer_type:"DEBITUR BARU",request_type:"PENERBITAN BANK GARANSI",
+  referral:"INFORMASI TIM CABANG",
+  location:{key_person:"DIREKTUR PROYEK",phone:"+6281234567890",
+   street:"Jalan Pengujian Nomor 12",village:"Kelurahan Sukamaju",
+   city:"Depok",distance_km:12.5},
+  environment:"KOMERSIAL_BISNIS",
+  facilities_within_1km:["Kantor pelayanan publik","Pusat perdagangan"],
+  notes:"Lokasi dan kegiatan proyek telah dijelaskan oleh pengurus saat kunjungan.",
+  photo_categories:["TAMPAK_MUKA","LINGKUNGAN_SEKITAR","NASABAH_DAN_RM"],
+  photo_document,attested:true,
+  ...changes,
+ };
+}
+async function approvedVisit(j){
+ const photos=await j.doc("LKN_PHOTOS","ao");
+ await j.cmd("record_visit","ao",visitData(photos));
+ const current=(await j.f.call("/applications/"+j.a.id+"/visit")).current;
+ assert.equal(current.status,"PENDING_BM_REVIEW");
+ const signed=await j.doc("LKN","ao");
+ await j.cmd("review_visit","mpo",{accepted:true,reason:"Bukti dan keterangan RM ditinjau",report_document:signed});
+ return (await j.f.call("/applications/"+j.a.id+"/visit")).current;
+}
+test("LKN digital form persists field evidence and independent BM review",async()=>{
+ const f=fixture(),j=new Journey(f);
+ await j.create();
+ const photo=await j.doc("LKN_PHOTOS","ao");
+ assert.equal((await j.cmd("record_visit","principal",visitData(photo),403)).code,"FORBIDDEN");
+ assert.equal((await j.cmd("record_visit","ao",visitData(photo,{attested:false}),422)).code,"VISIT");
+ await j.cmd("record_visit","ao",visitData(photo));
+ await f.login("ao");
+ let snapshot=await f.call("/applications/"+j.a.id+"/visit");
+ assert.equal(snapshot.conditional,true);
+ assert.equal(snapshot.current.rm,"ao");
+ assert.equal(snapshot.current.location.city,"Depok");
+ assert.equal(snapshot.current.environment,"KOMERSIAL_BISNIS");
+ assert.equal(snapshot.current.status,"PENDING_BM_REVIEW");
+ assert.equal((await j.cmd("record_visit","ao",visitData(photo),409)).code,"VISIT");
+ const signed=await j.doc("LKN","ao");
+ assert.equal((await j.cmd("review_visit","ao",{
+  accepted:true,reason:"Review disetujui oleh RM sendiri",report_document:signed},403)).code,"FORBIDDEN");
+ await j.cmd("review_visit","mpo",{
+  accepted:true,reason:"Dokumen disetujui setelah pemeriksaan lapangan",report_document:signed});
+ snapshot=await f.call("/applications/"+j.a.id+"/visit");
+ assert.equal(snapshot.current.status,"REVIEWED");
+ assert.equal(snapshot.current.bm,"mpo");
+ assert.equal(snapshot.legal_signature_verified,false);
+ await f.login("principal");
+ assert.equal((await f.call("/applications/"+j.a.id+"/visit",undefined,403)).code,"FORBIDDEN");
+ await f.login("audit");
+ assert.equal((await f.call("/audit/verify")).valid,true);
+ f.sqlite.close();
+});
+test("LKN review is blocked without latest verified signed LKN evidence",async()=>{
+ const f=fixture(),j=new Journey(f);
+ await j.create();
+ const photos=await j.doc("LKN_PHOTOS","ao");
+ await j.cmd("record_visit","ao",visitData(photos));
+ const unverified=await j.doc("LKN","ao",false);
+ assert.equal((await j.cmd("review_visit","mpo",{
+  accepted:true,reason:"Review tertahan saat bukti belum diverifikasi",
+  report_document:unverified},422)).code,"DOCUMENT");
+ const s=new Store(f.db);
+ assert.equal(s.get("visits",j.a.visit_id).status,"PENDING_BM_REVIEW");
+ f.sqlite.close();
+});
+test("new LKN revision and new photo evidence invalidate earlier 5C review",async()=>{
+ const f=fixture(),j=new Journey(f);
+ await j.create();
+ const original=await approvedVisit(j);
+ for(const kind of ["NIB","CONTRACT","KYB"])await j.doc(kind);
+ const financial=await j.doc("LAPORAN_KEUANGAN","analyst");
+ await j.cmd("submit","principal");
+ await j.cmd("kyb_pass","compliance",{screening_clear:true,ubo_verified:true});
+ const slik=await j.doc("SLIK","analyst");
+ await j.cmd("record_slik","analyst",{document:slik,
+  collectibility:1,pulled_at:new Date(f.now).toISOString()});
+ await j.cmd("partner_start","penjamin");
+ const sp2=await j.doc("SP2KBG","penjamin");
+ await j.cmd("sp2_issue","penjamin",{document:sp2,reference:"SP2-LKN-CHECK",
+  issuing_unit:"CABANG-UJI",amount:j.a.amount,valid_to:"2027-01-01"});
+ const five_c=Object.fromEntries(["character","capacity","capital","collateral","condition"]
+  .map(k=>[k,{risk:"LOW",finding:"Temuan kunjungan telah diverifikasi",
+    mitigation:"Pengawasan dokumen dan kondisi proyek"}]));
+ const form={
+  five_c,financial_document:financial,
+  financials:{current_assets:"200",current_liabilities:"100",total_debt:"50",equity:"200"},
+  recommendation:"LAYAK",narrative:"Analisis dikaitkan dengan LKN dan evidence"};
+ await j.cmd("record_5c","analyst",form);
+ await f.login("analyst");
+ const before=await f.call("/applications/"+j.a.id+"/enterprise");
+ assert.equal(before.underwriting.visit_id,original.id);
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"Hasil LKN dan 5C konsisten"});
+ await j.doc("LKN_PHOTOS","ao"); // replacing current evidence invalidates approved LKN
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"DOCUMENT");
+ const photo=await j.doc("LKN_PHOTOS","ao");
+ await j.cmd("record_visit","ao",visitData(photo,{notes:"Hasil kunjungan revisi dan peninjauan lapangan telah diperbarui."}));
+ const signed=await j.doc("LKN","ao");
+ await j.cmd("review_visit","mpo",{accepted:true,reason:"Kunjungan ulang disetujui",
+   report_document:signed});
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"UNDERWRITING");
+ await j.cmd("record_5c","analyst",form);
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"Analisis ulang LKN dan 5C telah diperiksa"});
+ await j.cmd("bank_underwrite","analyst");
+ assert.equal(j.a.state,"APPROVAL");
+ f.sqlite.close();
+});
+test("LKN rejects malformed location and external-application photo evidence",async()=>{
+ const f=fixture(),j=new Journey(f),other=new Journey(f);
+ await j.create();
+ const unrelated=await other.create({project_name:"Proyek Lain"});
+ const photo=await other.doc("LKN_PHOTOS","ao");
+ assert.equal((await j.cmd("record_visit","ao",visitData(photo),422)).code,"DOCUMENT");
+ const own=await j.doc("LKN_PHOTOS","ao");
+ assert.equal((await j.cmd("record_visit","ao",visitData(own,{
+  environment:"ZONA_PENGUJIAN_TIDAK_DISETUJUI"}),422)).code,"VISIT");
+ assert.equal((await j.cmd("record_visit","ao",visitData(own,{
+  location:{...visitData(own).location,distance_km:-4}}),422)).code,"VISIT");
+ assert.equal(new Store(f.db).rows("visits").length,0);
+ f.sqlite.close();
+});
