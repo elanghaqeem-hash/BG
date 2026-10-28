@@ -1216,3 +1216,162 @@ test("LKN photo bundles reject ordinary text and require a PDF container",async(
    .filter(d=>d.kind==="LKN_PHOTOS").length,0);
  f.sqlite.close();
 });
+
+
+function standardPayload(j,docs,overrides={}){
+ return {
+  checklist_complete:true,
+  owner:"PEMERINTAH_PUSAT",owner_other:"",
+  project_type:"KONSTRUKSI",project_type_other:"",
+  project_value:"4000000000",funding_source:"APBN_APBD",funding_other:"",
+  project_document:docs.contract,contract_reference:"KONTRAK-BG-SANDBOX-01",
+  contract_date:"2026-10-01",completion_months:6,
+  guarantee_amount:j.a.amount,guarantee_type:"KONTRA_BANK_GARANSI",guarantee_other:"",
+  customer_relationship:"DEBITUR_EKSIS",business_years:3,
+  management:"Dewan Direksi dan Manajemen telah diverifikasi RM",
+  slik_document:docs.slik,slik_comment:"Hasil SLIK didukung dokumen iDEB resmi dan diteliti manual",
+  projects_completed:5,projects_last_year:2,last_year_project_value:"5000000000",
+  business_condition:"Proyek berjalan dengan kondisi usaha yang telah diuji",
+  profit_history:[{year:2025,profit:"210000000"},{year:2024,profit:"-17000000"}],
+  financial_document:docs.financial,
+  bank_support:"ADA",bank_support_details:"Fasilitas transaksi bank yang telah dibuktikan",
+  additional_collateral:"0",collateral_type_other:"",
+  recommendation:"LAYAK",
+  reason:"Nasabah memiliki dasar permohonan dan arus usaha yang diuji manual",
+  ...overrides
+ };
+}
+async function standardJourney(f){
+ const j=new Journey(f);
+ await j.create();
+ const contract=await j.doc("CONTRACT");
+ for(const kind of ["NIB","KYB"])await j.doc(kind);
+ await j.cmd("submit","principal");
+ await j.cmd("kyb_pass","compliance",{screening_clear:true,ubo_verified:true});
+ const slik=await j.doc("SLIK","analyst");
+ await j.cmd("record_slik","analyst",{
+  document:slik,collectibility:1,pulled_at:new Date(f.now).toISOString()
+ });
+ await j.cmd("partner_start","penjamin");
+ const sp2=await j.doc("SP2KBG","penjamin");
+ await j.cmd("sp2_issue","penjamin",{document:sp2,reference:"SP2-STANDARD-2026",
+   issuing_unit:"CABANG-UJI",amount:j.a.amount,valid_to:"2027-01-01"});
+ const financial=await j.doc("LAPORAN_KEUANGAN","analyst");
+ return {j,docs:{contract,slik,financial}};
+}
+async function acceptedStandard(j,docs,payload){
+ await j.cmd("record_standard_analysis","ao",payload||standardPayload(j,docs));
+ await j.cmd("review_standard_analysis","mpo",{accepted:true,
+  reason:"Pemeriksaan independen atas seluruh data Lampiran 5"});
+ return (await j.f.call("/applications/"+j.a.id+"/standard-analysis")).current;
+}
+function fiveCAnalytic(financial){
+ const five_c=Object.fromEntries(["character","capacity","capital","collateral","condition"]
+ .map(k=>[k,{risk:"LOW",finding:"Temuan didukung bukti yang diverifikasi",
+    mitigation:"Pengawasan data, risiko, dan agunan berjalan"}]));
+ return {financial_document:financial,five_c,
+  financials:{current_assets:"900000000",current_liabilities:"200000000",
+   total_debt:"300000000",equity:"900000000"},
+  recommendation:"LAYAK",narrative:"Hasil analisis 5C mengacu Formulir Standar Analisa dan dokumen sumber"};
+}
+test("Lampiran 5 form captures exact source project, 5C and profit fields without auto scoring",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ const data=standardPayload(j,docs);
+ await j.cmd("record_standard_analysis","ao",data);
+ await f.login("analyst");
+ const snapshot=await f.call("/applications/"+j.a.id+"/standard-analysis");
+ assert.equal(snapshot.current.project.owner,"PEMERINTAH_PUSAT");
+ assert.equal(snapshot.current.project.value,"4000000000.00");
+ assert.equal(snapshot.current.character.business_years,3); // exact threshold not auto classified
+ assert.equal(snapshot.current.condition.projects_completed,5);
+ assert.equal(snapshot.current.condition.last_year_project_value,"5000000000.00");
+ assert.equal(snapshot.current.capacity.profit_history[1].profit,"-17000000.00");
+ assert.equal(snapshot.current.source_boundary.experience_exactly_3,"UNDEFINED_IN_FORM");
+ assert.equal(snapshot.risk_score_automated,false);
+ assert.equal(snapshot.current.status,"PENDING_REVIEW");
+ assert.equal((await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial),409)).code,"STANDARD_ANALYSIS");
+ await j.cmd("review_standard_analysis","mpo",{accepted:true,
+  reason:"Rekomendasi RM diteliti secara independen"});
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ await f.login("analyst");
+ const enterprise=await f.call("/applications/"+j.a.id+"/enterprise");
+ assert.equal(enterprise.underwriting.standard_analysis_id,snapshot.current.id);
+ assert.equal(enterprise.underwriting.ratios.net_working_capital,"700000000.00");
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"5C dan Formulir Standar Analisa konsisten"});
+ await j.cmd("bank_underwrite","analyst");
+ assert.equal(j.a.state,"APPROVAL");
+ f.sqlite.close();
+});
+test("Standard Analysis prevents maker self-review and bank approvals of incomplete checklist",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ await j.cmd("record_standard_analysis","ao",standardPayload(j,docs,{checklist_complete:false}));
+ assert.equal((await j.cmd("review_standard_analysis","ao",{
+  accepted:true,reason:"Ditinjau oleh pembuat yang sama"},403)).code,"FORBIDDEN");
+ assert.equal((await j.cmd("review_standard_analysis","mpo",{
+  accepted:true,reason:"Pemeriksaan dokumen belum lengkap"},422)).code,"STANDARD_ANALYSIS");
+ const view=await f.call("/applications/"+j.a.id+"/standard-analysis");
+ assert.equal(view.current.status,"PENDING_REVIEW");
+ await j.cmd("review_standard_analysis","mpo",{accepted:false,
+  reason:"Kembalikan untuk melengkapi checklist"});
+ const after=await f.call("/applications/"+j.a.id+"/standard-analysis");
+ assert.equal(after.current.status,"RETURNED");
+ assert.equal((await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial),409)).code,"STANDARD_ANALYSIS");
+ f.sqlite.close();
+});
+test("Standard Analysis prevents stale verified source documents and unreviewed revision",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ const first=await acceptedStandard(j,docs);
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"Data awal layak untuk ditelaah"});
+ const revised=standardPayload(j,docs,{business_years:10,
+  reason:"Formulir lama diperbarui berdasarkan data terbaru proyek dan pengalaman"});
+ await j.cmd("record_standard_analysis","ao",revised);
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"STANDARD_ANALYSIS");
+ await j.cmd("review_standard_analysis","mpo",{accepted:true,
+  reason:"Analisis revisi telah diperiksa"});
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"UNDERWRITING");
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"Revisi 5C baru sesuai Formulir Standar"});
+ await j.doc("CONTRACT","principal"); // latest document revision invalidates form
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"DOCUMENT");
+ const fState=await f.call("/applications/"+j.a.id+"/standard-analysis");
+ assert.notEqual(fState.current.id,first.id);
+ assert.equal(fState.history.length,2);
+ f.sqlite.close();
+});
+test("Lampiran 5 refuses bogus profit, cross-application source and unauthorized principal access",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ const other=new Journey(f);await other.create({project_name:"Other transaction"});
+ const wrong=await other.doc("LAPORAN_KEUANGAN","analyst");
+ assert.equal((await j.cmd("record_standard_analysis","ao",
+  standardPayload(j,docs,{financial_document:wrong}),422)).code,"DOCUMENT");
+ assert.equal((await j.cmd("record_standard_analysis","ao",
+  standardPayload(j,docs,{profit_history:[{year:2025,profit:"Infinity"},{year:2024,profit:"100"}]}),422)).code,"STANDARD_ANALYSIS");
+ assert.equal((await j.cmd("record_standard_analysis","ao",
+  standardPayload(j,docs,{business_years:"-5"}),422)).code,"STANDARD_ANALYSIS");
+ await f.login("principal");
+ assert.equal((await f.call("/applications/"+j.a.id+"/standard-analysis",undefined,403)).code,"FORBIDDEN");
+ assert.equal(new Store(f.db).rows("standard_analyses").length,0);
+ f.sqlite.close();
+});
+test("Lampiran 5 permits a third accounting row but never auto-approves marginal raw thresholds",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ const pack=standardPayload(j,docs,{
+  project_value:"1500000000", // source provides values, no fabricated refusal threshold
+  projects_completed:5,business_years:3,
+  last_year_project_value:"5000000000",
+  profit_history:[{year:2025,profit:"0"},{year:2024,profit:"-15000.10"},
+    {year:2023,profit:"30000"}],
+  bank_support:"TIDAK_ADA",bank_support_details:"",
+  recommendation:"TIDAK_LAYAK"
+ });
+ await j.cmd("record_standard_analysis","ao",pack);
+ const snapshot=await f.call("/applications/"+j.a.id+"/standard-analysis");
+ assert.equal(snapshot.current.project.amount_exceeds_project,true);
+ assert.equal(snapshot.current.recommendation,"TIDAK_LAYAK");
+ assert.equal(snapshot.current.capacity.profit_history.length,3);
+ assert.equal(snapshot.current.capacity.profit_history[1].profit,"-15000.10");
+ assert.equal(snapshot.current.source_boundary.completed_exactly_5,"UNDEFINED_IN_FORM");
+ assert.equal(snapshot.current.status,"PENDING_REVIEW");
+ f.sqlite.close();
+});
