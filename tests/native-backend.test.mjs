@@ -1140,8 +1140,10 @@ test("LKN review is blocked without latest verified signed LKN evidence",async()
  assert.equal((await j.cmd("review_visit","mpo",{
   accepted:true,reason:"Review tertahan saat bukti belum diverifikasi",
   report_document:unverified},422)).code,"DOCUMENT");
+ await f.login("mpo");
+ const snapshot=await f.call("/applications/"+j.a.id+"/visit");
  const s=new Store(f.db);
- assert.equal(s.get("visits",j.a.visit_id).status,"PENDING_BM_REVIEW");
+ assert.equal(s.get("visits",snapshot.current.id).status,"PENDING_BM_REVIEW");
  f.sqlite.close();
 });
 test("new LKN revision and new photo evidence invalidate earlier 5C review",async()=>{
