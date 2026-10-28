@@ -15,6 +15,7 @@ import {
   type Data,
 } from "./core.ts";
 import { Service, BANK, OPS, randomToken } from "./service.ts";
+import { enterpriseSnapshot, policySimulation } from "./enterprise-controls.ts";
 import { IDENTITIES } from "./bootstrap.ts";
 import QRCode from "qrcode";
 export type Input = {
@@ -333,6 +334,9 @@ export function route(service: Service, input: Input): Response {
       201,
     );
   }
+  if (matches("applications", "*", "enterprise") && method === "GET") {
+    return json(enterpriseSnapshot(service,a,s.get("applications",p[1])));
+  }
   if (matches("applications", "*") && method === "GET")
     return json(service.view(a, s.get("applications", p[1])));
   if (matches("applications", "*", "commands", "*") && post) {
@@ -375,6 +379,7 @@ export function route(service: Service, input: Input): Response {
     service.access(a, app, a.role === "BROKER");
     const allowed: Data = {
       PRINCIPAL: [
+        "AMENDMENT_REQUEST",
         "NIB","CONTRACT","KYB","PRINCIPAL_REQUEST","MANDATE",
         "AKTA_PENDIRIAN","IDENTITAS_PENGURUS","NPWP","TDR",
         "LAPORAN_KEUANGAN","SIUJK","ASOSIASI_PROFESI","IZIN_LAINNYA",
@@ -383,6 +388,7 @@ export function route(service: Service, input: Input): Response {
         "BUKTI_BIAYA","SURAT_KUASA_PEMBLOKIRAN",
       ],
       BROKER: [
+        "AMENDMENT_REQUEST",
         "NIB","CONTRACT","KYB","PRINCIPAL_REQUEST",
         "AKTA_PENDIRIAN","IDENTITAS_PENGURUS","NPWP","TDR",
         "LAPORAN_KEUANGAN","SIUJK","ASOSIASI_PROFESI","IZIN_LAINNYA",
@@ -687,6 +693,10 @@ export function route(service: Service, input: Input): Response {
       external_anchor_verified: false,
     });
   }
+  if (matches("policies","*","simulate") && post) {
+    fields(b,["facts","codes"],["facts"]);
+    return json(policySimulation(service,a,p[1],b.facts,b.codes));
+  }
   if (matches("policies") && post) {
     service.role(a, ["ADMIN"]);
     fields(b, ["configuration"], ["configuration"]);
@@ -747,6 +757,13 @@ function validateCommand(command: string, x: Data) {
     withdraw: ["document"],
     refer_dispute: ["document"],
     request_close: ["document"],
+    record_5c: ["five_c","financial_document","financials","recommendation","narrative"],
+    review_5c: ["accepted","reason"],
+    review_counter: ["scheme","pks_reference","pks_document"],
+    register_collateral: ["type","value","document","binding_reference"],
+    approve_collateral: ["collateral_id","accepted","reason"],
+    request_servicing: ["kind","document","reason"],
+    request_bg_closure: ["document"],
   };
   for (const field of required[command] || [])
     req(
@@ -759,6 +776,11 @@ function validateCommand(command: string, x: Data) {
     "reference",
     "issuing_unit",
     "draft_hash",
+    "financial_document",
+    "pks_reference",
+    "pks_document",
+    "collateral_id",
+    "binding_reference",
     "to",
     "decision",
   ])
