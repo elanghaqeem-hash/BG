@@ -126,11 +126,10 @@ export function approveServicing(svc:Service,actor:Data,a:Row,x:Data) {
   req(![a.maker,r.requested_by,r.risk_review?.actor,r.counter_endorsement?.actor].includes(actor.id),
     "SOD","Pembuat/pemeriksa tidak dapat menyetujui sendiri",403);
   projectCheck(svc,a,r);
-  req(svc.latest(a,"SLIK").digest===r.risk_review.evidence.SLIK.digest &&
-    svc.latest(a,"DHN").digest===r.risk_review.evidence.DHN.digest &&
-    svc.latest(a,"LEGAL_CHECK").digest===r.risk_review.evidence.LEGAL_CHECK.digest &&
-    svc.latest(a,"MAP_BG").digest===r.risk_review.evidence.MAP_BG.digest,
-    "DOCUMENT","Bukti review perubahan telah diganti",409);
+  req(["SLIK","DHN","LEGAL_CHECK","MAP_BG"].every(k=>{
+    const current=svc.latest(a,k), evidence=r.risk_review.evidence[k];
+    return current.id===evidence.id && current.digest===evidence.digest;
+  }),"DOCUMENT","Dokumen review perubahan sudah diganti; analisa ulang diperlukan",409);
   svc.doc(a,r.counter_endorsement.document,"COUNTER_ENDORSEMENT");
   req(r.counter_endorsement.cover_until>=targetExpiry(r,a) &&
     money(r.counter_endorsement.cover_amount)>=money(targetAmount(r,a)) &&
