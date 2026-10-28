@@ -193,7 +193,12 @@ export function requestServicing(svc:Service,actor:Data,a:Row,x:Data) {
     kind:x.kind,document:doc.id,document_hash:doc.digest,
     proposed,status:"PENDING_REVIEW",requested_by:actor.id,
     requested_at:svc.iso,reason:note(x.reason,"Alasan perubahan"),
-    baseline_fingerprint:svc.fingerprint(a),baseline_bg_number:a.bg_number});
+    baseline_fingerprint:svc.fingerprint(a),baseline_bg_number:a.bg_number,
+    baseline_document_ids:Object.fromEntries(["SLIK","DHN","LEGAL_CHECK","MAP_BG"].map(k=>{
+      const existing=svc.docs(a).filter(d=>d.kind===k)
+        .sort((x,y)=>(y.revision||0)-(x.revision||0));
+      return [k,existing[0]?.id||null];
+    }))});
   return item;
 }
 export function requestClosure(svc:Service,actor:Data,a:Row,x:Data) {
