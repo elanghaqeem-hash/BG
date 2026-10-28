@@ -101,6 +101,11 @@ export function recordStandardAnalysis(svc:Service,actor:Data,a:Row,x:Data) {
   });
   req(new Set(profits.map(p=>p.year)).size===profits.length,
     "STANDARD_ANALYSIS","Tahun laba harus berbeda");
+  const orderedYears=profits.map(p=>p.year).sort((a,b)=>b-a);
+  req(orderedYears.every((year,i)=>i===0||orderedYears[i-1]-year===1),
+    "STANDARD_ANALYSIS","Riwayat laba harus berupa tahun berurutan",409);
+  req(orderedYears[0]>=Number(jakartaDate(svc.now).slice(0,4))-3,
+    "STANDARD_ANALYSIS","Periode laba terakhir terlalu lama untuk analisis berjalan",409);
   req(typeof x.additional_collateral==="string","STANDARD_ANALYSIS",
     "Nilai agunan tambahan wajib dinyatakan (nol jika tidak ada)");
   const extraCollateral=amount(money(x.additional_collateral));
