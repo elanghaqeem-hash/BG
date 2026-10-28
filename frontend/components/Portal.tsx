@@ -65,7 +65,7 @@ export default function Portal(){
           </header>
           <div className="login-story-main">
             <span className="eyebrow">BANK GARANSI SYARIAH</span>
-            <h1>Satu alur.<br/>Lima pihak.<br/><em>Kepercayaan terjaga.</em></h1>
+            <h1>Satu alur.<br/>Lima pihak.<em>Kepercayaan terjaga.</em></h1>
             <p>Pengajuan, penjaminan, penerbitan, hingga klaim dalam satu ruang kerja yang tertata dan mudah ditelusuri.</p>
           </div>
           <div className="login-ecosystem">
