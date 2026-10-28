@@ -35,6 +35,7 @@ export const TABLES = [
   "collaterals",
   "limit_reservations",
   "servicing",
+  "visits",
   "anchors",
 ] as const;
 export type Table = (typeof TABLES)[number];
@@ -451,6 +452,7 @@ export function initializeSchema(db: Database) {
     ["collaterals", "application_id"],
     ["limit_reservations", "application_id"],
     ["servicing", "application_id"],
+    ["visits", "application_id"],
   ])
     db.run(
       `CREATE INDEX IF NOT EXISTS ${table}_${field}_index ON ${table}(json_extract(data,'$.${field}'))`,
