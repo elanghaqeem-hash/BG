@@ -6,7 +6,6 @@ import {
 import type { Service } from "./service.ts";
 
 const fiveC = ["character", "capacity", "capital", "collateral", "condition"] as const;
-const issuedStates = new Set(["BG_ISSUED", "KONTRA_BG_ISSUED", "DELIVERED_TO_OBLIGEE", "ACTIVE"]);
 
 function note(value: unknown, field: string) {
   req(typeof value === "string" && value.trim().length >= 8 && value.length <= 4000,
@@ -74,7 +73,7 @@ export function recordFiveC(svc: Service, actor: Data, a: Row, x: Data) {
     evidence_document:evidence.id, evidence_hash:evidence.digest,
     five_c:assessments, financials:fin,
     ratios:{current_ratio:ratio(ca,cl),debt_to_equity:ratio(debt,eq),
-      net_working_capital:amount(ca-cl >= 0n ? ca-cl : 0n),
+      net_working_capital:(ca < cl ? "-" : "") + amount(ca < cl ? cl-ca : ca-cl),
       nwc_negative:ca < cl},
     recommendation:x.recommendation,
     narrative:note(x.narrative,"Kesimpulan analis"),
@@ -121,7 +120,7 @@ export function registerCollateral(svc: Service, actor: Data, a: Row, x: Data) {
   svc.role(actor,["ANALYST","MPO"]);
   svc.state(a,"APPROVAL_GRANTED","MKP_SIGNED","AKAD_SIGNED","FEE_COLLECTED","INTER_OFFICE_ISSUANCE");
   req(["CASH","FIXED_ASSET","COUNTER_BG"].includes(x.type),"COLLATERAL","Jenis agunan tidak valid");
-  const evidence=svc.doc(a,x.document);
+  const evidence=svc.doc(a,x.document,"COLLATERAL");
   req(money(x.value)>0n,"COLLATERAL","Nilai agunan harus positif");
   const row=svc.s.add("collaterals",{id:uid(),application_id:a.id,type:x.type,
     value:amount(money(x.value)),currency:"IDR",
@@ -133,6 +132,7 @@ export function registerCollateral(svc: Service, actor: Data, a: Row, x: Data) {
 }
 export function approveCollateral(svc: Service,actor: Data,a:Row,x:Data) {
   svc.role(actor,["COMPLIANCE","LEGAL"]);
+  svc.state(a,"APPROVAL_GRANTED","MKP_SIGNED","AKAD_SIGNED","FEE_COLLECTED","INTER_OFFICE_ISSUANCE");
   const row=svc.s.get("collaterals",x.collateral_id);
   req(row.application_id===a.id,"NOT_FOUND","Agunan tidak ditemukan",404);
   req(row.state==="PENDING_VERIFICATION","COLLATERAL","Agunan bukan menunggu verifikasi",409);
@@ -211,6 +211,7 @@ export function confirmClosure(svc:Service,actor:Data,a:Row) {
   const request=a.closure_request, g=svc.s.get("guarantees",a.id);
   req(request && request.maker!==actor.id,"SOD","Penutupan memerlukan checker berbeda",403);
   req(request.baseline===svc.fingerprint(a),"VERSION","Data material berubah",409);
+  svc.doc(a,request.document,"RELEASE");
   req(timestamp(g.claim_deadline)<svc.now,"CLOSURE","Periode klaim masih berjalan",409);
   req(!svc.s.rows("claims",{application_id:a.id}).some(c=>c.state!=="WITHDRAWN" || c.bank_paid_at),
     "CLOSURE","Klaim masih terbuka",409);
