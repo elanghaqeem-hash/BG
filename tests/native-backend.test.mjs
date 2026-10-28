@@ -163,6 +163,7 @@ class Journey {
       {
         kind,
         content_base64: Buffer.from(
+          (kind==="LKN_PHOTOS"?"%PDF-1.7\n":"") +
           "Bukti sandbox " + kind + " " + randomBytes(4).toString("hex"),
         ).toString("base64"),
         source_reference: "Sumber primer UAT",
