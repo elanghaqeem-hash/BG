@@ -25,6 +25,7 @@ import { recordFiveC, reviewFiveC, counterReview, registerCollateral, approveCol
 import {reviewServicing, partnerEndorse, approveServicing, rejectServicing,
   withdrawServicing, cancelApprovedServicing} from "./servicing-engine.ts";
 import {recordVisit, reviewVisit, checkedVisit} from "./visit-reports.ts";
+import {recordStandardAnalysis,reviewStandardAnalysis,checkedStandardAnalysis} from "./standard-analysis.ts";
 export const BANK = new Set([
   "AO",
   "ANALYST",
@@ -636,6 +637,12 @@ export class Service {
       case "review_visit":
         reviewVisit(this,actor,a,x);
         break;
+      case "record_standard_analysis":
+        recordStandardAnalysis(this,actor,a,x);
+        break;
+      case "review_standard_analysis":
+        reviewStandardAnalysis(this,actor,a,x);
+        break;
       case "record_5c":
         recordFiveC(this,actor,a,x);
         break;
@@ -782,6 +789,7 @@ export class Service {
       case "bank_underwrite":
         this.role(actor, ["ANALYST"]);
         this.state(a, "SP2KBG_ISSUED");
+        checkedStandardAnalysis(this,a);
         checkedVisit(this,a); // Optional visit; if recorded, branch review must be complete.
         // New structured 5C cases are fail-closed; legacy sandbox applications remain
         // compatible until the institutional policy activates mandatory 5C.
@@ -789,6 +797,7 @@ export class Service {
           const review = this.s.get("underwritings",a.underwriting_id);
           req(review.state==="REVIEWED" && review.application_fingerprint===this.fingerprint(a) &&
             (review.visit_id||null)===(a.visit_id||null) &&
+            (review.standard_analysis_id||null)===(a.standard_analysis_id||null) &&
             review.recommendation==="LAYAK",
             "UNDERWRITING","5C harus disetujui dengan rekomendasi layak",409);
         }
