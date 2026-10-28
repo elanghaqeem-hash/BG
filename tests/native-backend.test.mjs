@@ -1031,3 +1031,44 @@ test("public QR reports closed BG as authentic but not active",async()=>{
   assert.equal(check.claim_window_open,false);
   f.sqlite.close();
 });
+
+
+test("servicing raises approval authority when revised private BG exceeds committee threshold",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active({obligee:"obligee-private"});
+  const id=await reviewedServicing(j,"4000000000");
+  assert.equal((await j.cmd("approve_servicing","gh",{servicing_id:id},403)).code,"FORBIDDEN");
+  await j.cmd("approve_servicing","mpo",{servicing_id:id});
+  await f.login("mpo");
+  let rows=await f.call("/applications/"+j.a.id+"/servicing");
+  assert.equal(rows[0].status,"PARTNER_ENDORSED");
+  assert.deepEqual(rows[0].approved_roles,["MPO"]);
+  await j.cmd("approve_servicing","direksi",{servicing_id:id});
+  rows=await f.call("/applications/"+j.a.id+"/servicing");
+  assert.equal(rows[0].status,"APPROVED_PENDING_ISSUANCE");
+  assert.deepEqual(rows[0].approved_roles,["MPO","DIREKSI"]);
+  f.sqlite.close();
+});
+
+test("verified MAP-BG replacement after risk review requires new assessment",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const id=await reviewedServicing(j);
+  await j.doc("MAP_BG","analyst");
+  assert.equal((await j.cmd("approve_servicing","mpo",{servicing_id:id},409)).code,"DOCUMENT");
+  const s=new Store(f.db);
+  assert.equal(s.get("servicing",id).status,"PARTNER_ENDORSED");
+  assert.equal(s.rows("approvals").filter(x=>x.servicing_id===id).length,0);
+  f.sqlite.close();
+});
+
+test("no-op amendment cannot advance even with a verified request",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const document=await j.doc("AMENDMENT_REQUEST","principal");
+  assert.equal((await j.cmd("request_servicing","principal",{
+    kind:"AMENDMENT",document,
+    proposed_amount:j.a.amount,reason:"Tidak ada perubahan nominal"},409)).code,"SERVICING");
+  assert.equal(new Store(f.db).rows("servicing").length,0);
+  f.sqlite.close();
+});
