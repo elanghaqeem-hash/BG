@@ -16,6 +16,7 @@ import {
 } from "./core.ts";
 import { Service, BANK, OPS, randomToken } from "./service.ts";
 import { enterpriseSnapshot, policySimulation } from "./enterprise-controls.ts";
+import {servicingListing} from "./servicing-engine.ts";
 import { IDENTITIES } from "./bootstrap.ts";
 import QRCode from "qrcode";
 export type Input = {
@@ -334,6 +335,9 @@ export function route(service: Service, input: Input): Response {
       201,
     );
   }
+  if (matches("applications", "*", "servicing") && method === "GET") {
+    return json(servicingListing(service,a,s.get("applications",p[1])));
+  }
   if (matches("applications", "*", "enterprise") && method === "GET") {
     return json(enterpriseSnapshot(service,a,s.get("applications",p[1])));
   }
@@ -397,6 +401,7 @@ export function route(service: Service, input: Input): Response {
       ],
       PENJAMIN: [
         "SP2KBG",
+        "COUNTER_ENDORSEMENT",
         "FORMAT_APPROVAL",
         "CERTIFICATE",
         "CONTRA_DECISION",
@@ -763,6 +768,12 @@ function validateCommand(command: string, x: Data) {
     register_collateral: ["type","value","document","binding_reference"],
     approve_collateral: ["collateral_id","accepted","reason"],
     request_servicing: ["kind","document","reason"],
+    review_servicing: ["servicing_id","collectibility","pulled_at","screening_clear","ubo_verified","recommendation","narrative"],
+    partner_endorse: ["servicing_id","document","reference","cover_amount","cover_until"],
+    approve_servicing: ["servicing_id"],
+    reject_servicing: ["servicing_id","reason"],
+    withdraw_servicing: ["servicing_id","reason"],
+    cancel_approved_servicing: ["servicing_id","document","reason"],
     request_bg_closure: ["document"],
   };
   for (const field of required[command] || [])
@@ -780,6 +791,7 @@ function validateCommand(command: string, x: Data) {
     "pks_reference",
     "pks_document",
     "collateral_id",
+    "servicing_id",
     "binding_reference",
     "to",
     "decision",
