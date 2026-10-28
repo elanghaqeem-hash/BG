@@ -895,3 +895,27 @@ test("BG servicing retains original certificate; closure blocked until claim per
   assert.equal((await g.call("/public/verify/no-token")).authentic,false);
   g.sqlite.close();
 });
+
+
+test("replacement evidence invalidates earlier verified version during document gate",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.create();
+  await j.doc("NIB");
+  const second=await j.doc("NIB","principal",false);
+  assert.ok(second);
+  const detail=await f.call("/applications/"+j.a.id);
+  assert.equal(detail.document_checklist.items.find(x=>x.kind==="NIB").status,"PENDING");
+  assert.equal((await j.cmd("submit","principal",{},422)).code,"BR-09");
+  f.sqlite.close();
+});
+
+test("collateral cannot be registered using a non-collateral document",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.issued({},true);
+  const unrelated=await j.doc("NIB","analyst");
+  assert.equal((await j.cmd("register_collateral","analyst",{
+    type:"CASH",value:"100",document:unrelated,
+    binding_reference:"BANK-BLOCK-2026"},422)).code,"DOCUMENT");
+  assert.equal(new Store(f.db).rows("collaterals").length,0);
+  f.sqlite.close();
+});
