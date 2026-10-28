@@ -1035,7 +1035,9 @@ test("public QR reports closed BG as authentic but not active",async()=>{
 
 test("servicing raises approval authority when revised private BG exceeds committee threshold",async()=>{
   const f=fixture(),j=new Journey(f);
-  await j.active({obligee:"obligee-private"});
+  await j.issued({obligee:"obligee-private"});
+  await j.cmd("certificate","penjamin",{document:await j.doc("CERTIFICATE","penjamin"),reference:"PRIVATE-CERT-2026"});
+  await j.cmd("deliver","mpo",{document:await j.doc("DELIVERY","obligee_private")});
   const id=await reviewedServicing(j,"4000000000");
   assert.equal((await j.cmd("approve_servicing","gh",{servicing_id:id},403)).code,"FORBIDDEN");
   await j.cmd("approve_servicing","mpo",{servicing_id:id});
