@@ -98,6 +98,9 @@ export function reviewFiveC(svc: Service, actor: Data, a: Row, x: Data) {
   req(r.application_id===a.id && r.state==="PENDING_REVIEW", "UNDERWRITING", "Analisa tidak dapat direview");
   req(r.analyst!==actor.id && a.maker!==actor.id, "SOD", "Maker tidak boleh mereview sendiri", 403);
   req(r.application_fingerprint===svc.fingerprint(a), "VERSION", "Data material telah berubah", 409);
+  const currentFinancial=svc.doc(a,r.evidence_document,"LAPORAN_KEUANGAN");
+  req(currentFinancial.digest===r.evidence_hash,"DOCUMENT",
+    "Bukti keuangan 5C telah berubah; analisis ulang diperlukan",409);
   const latestVisit=currentVisit(svc,a);
   req((r.visit_id||null)===(latestVisit?.id||null),"VISIT",
     "LKN berubah; analisis 5C harus diperbarui",409);
