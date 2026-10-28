@@ -6,6 +6,7 @@ import {
 import type { Service } from "./service.ts";
 import {unresolvedServicing} from "./servicing-engine.ts";
 import {checkedVisit, currentVisit} from "./visit-reports.ts";
+import {checkedStandardAnalysis} from "./standard-analysis.ts";
 
 const fiveC = ["character", "capacity", "capital", "collateral", "condition"] as const;
 
@@ -48,6 +49,7 @@ export function recordFiveC(svc: Service, actor: Data, a: Row, x: Data) {
   svc.role(actor, ["ANALYST"]);
   svc.state(a, "SP2KBG_ISSUED");
   const visit=checkedVisit(svc,a);
+  const standard=checkedStandardAnalysis(svc,a);
   req(x.five_c && typeof x.five_c === "object" && !Array.isArray(x.five_c),
     "UNDERWRITING", "Kelima aspek 5C wajib diisi");
   req(Object.keys(x.five_c).sort().join(",") === [...fiveC].sort().join(","),
@@ -75,6 +77,8 @@ export function recordFiveC(svc: Service, actor: Data, a: Row, x: Data) {
     application_fingerprint:svc.fingerprint(a),
     visit_id:visit?.id||null,
     visit_review_digest:visit?.review_digest||null,
+    standard_analysis_id:standard?.id||null,
+    standard_analysis_digest:standard?.review_digest||null,
     evidence_document:evidence.id, evidence_hash:evidence.digest,
     five_c:assessments, financials:fin,
     ratios:{current_ratio:ratio(ca,cl),debt_to_equity:ratio(debt,eq),
@@ -99,6 +103,10 @@ export function reviewFiveC(svc: Service, actor: Data, a: Row, x: Data) {
     "LKN berubah; analisis 5C harus diperbarui",409);
   if(latestVisit)req(checkedVisit(svc,a)?.review_digest===r.visit_review_digest,
     "VISIT","Dokumen hasil kunjungan tidak konsisten",409);
+  const latestForm=checkedStandardAnalysis(svc,a);
+  req((r.standard_analysis_id||null)===(latestForm?.id||null) &&
+    (r.standard_analysis_digest||null)===(latestForm?.review_digest||null),
+    "STANDARD_ANALYSIS","Formulir analisa berubah; 5C harus disusun ulang",409);
   req(x.accepted===true || x.accepted===false, "UNDERWRITING", "Keputusan review wajib diisi");
   r.state=x.accepted ? "REVIEWED" : "RETURNED";
   r.checker=actor.id;
