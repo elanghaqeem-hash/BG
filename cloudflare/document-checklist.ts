@@ -8,11 +8,11 @@
  */
 type Evidence = {kind: string; verified: boolean; created_at?: string; id?: string};
 type Application = {
-  bg_type: string;
-  processing_office: string;
-  issuing_office: string;
+  bg_type?: string;
+  processing_office?: string;
+  issuing_office?: string;
   custom_format?: boolean;
-  state: string;
+  state?: string;
 };
 type Requirement = {
   kind: string;
@@ -78,7 +78,7 @@ function phaseOf(state: string): number {
   return 5;
 }
 export function buildDocumentChecklist(a: Application, docs: Evidence[], role: string) {
-  const stage=phaseOf(a.state);
+  const stage=phaseOf(a.state??'DRAFT');
   const allowed = role==="PENJAMIN"
     ? new Set(["SP2KBG","CERTIFICATE","FORMAT_APPROVAL"])
     : null;
