@@ -17,6 +17,7 @@ import {
 import { Service, BANK, OPS, randomToken } from "./service.ts";
 import { enterpriseSnapshot, policySimulation } from "./enterprise-controls.ts";
 import {servicingListing} from "./servicing-engine.ts";
+import {visitSnapshot} from "./visit-reports.ts";
 import { IDENTITIES } from "./bootstrap.ts";
 import QRCode from "qrcode";
 export type Input = {
@@ -334,6 +335,9 @@ export function route(service: Service, input: Input): Response {
       service.create(a, { bg_type: "PELAKSANAAN", custom_format: false, ...b }),
       201,
     );
+  }
+  if (matches("applications", "*", "visit") && method === "GET") {
+    return json(visitSnapshot(service,a,s.get("applications",p[1])));
   }
   if (matches("applications", "*", "servicing") && method === "GET") {
     return json(servicingListing(service,a,s.get("applications",p[1])));
@@ -762,6 +766,8 @@ function validateCommand(command: string, x: Data) {
     withdraw: ["document"],
     refer_dispute: ["document"],
     request_close: ["document"],
+    record_visit: ["visited_at","customer_type","request_type","location","environment","facilities_within_1km","notes","photo_categories","photo_document","attested"],
+    review_visit: ["accepted","reason","report_document"],
     record_5c: ["five_c","financial_document","financials","recommendation","narrative"],
     review_5c: ["accepted","reason"],
     review_counter: ["scheme","pks_reference","pks_document"],
