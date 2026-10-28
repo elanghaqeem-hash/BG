@@ -153,22 +153,19 @@ export class Service {
       "DOCUMENT",
       "Dokumen tidak cocok dengan transaksi/jenis",
     );
-    req(
-      !verified || d.verified,
-      "DOCUMENT",
-      "Dokumen belum diverifikasi ke sumber primer",
-    );
+    req(!verified || d.verified,
+      "DOCUMENT", "Dokumen belum diverifikasi ke sumber primer");
+    if(verified && kind)
+      req(this.latest(a,kind).id===d.id,"DOCUMENT",
+        "Versi dokumen yang dirujuk bukan versi terbaru",409);
     return d;
   }
   latest(a: Row, kind: string) {
-    const docs = this.docs(a)
-      .filter((x) => x.kind === kind && x.verified)
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
-    req(
-      docs.length,
-      "DOCUMENT",
-      "Dokumen " + kind + " terverifikasi diperlukan",
-    );
+    const docs = this.docs(a).filter(x => x.kind === kind)
+      .sort((x,y) => (y.revision||0)-(x.revision||0) ||
+        y.created_at.localeCompare(x.created_at));
+    req(docs[0]?.verified, "DOCUMENT",
+      "Versi dokumen terbaru " + kind + " harus diverifikasi");
     return docs[0];
   }
   addDocument(
@@ -190,6 +187,7 @@ export class Service {
       id,
       application_id: a.id,
       kind,
+      revision: this.docs(a).filter(d=>d.kind===kind).length+1,
       digest: hash(raw),
       iv: encrypted.iv,
       tag: encrypted.tag,
@@ -250,12 +248,15 @@ export class Service {
     );
   }
   facts(a: Row) {
-    const p = this.policy(a),
-      kinds = new Set(
-        this.docs(a)
-          .filter((d) => d.verified)
-          .map((d) => d.kind),
-      );
+    const p = this.policy(a);
+    const latestDocs = new Map<string,Row>();
+    for(const d of this.docs(a)) {
+      const current=latestDocs.get(d.kind);
+      if(!current || (d.revision||0)>(current.revision||0) ||
+        ((d.revision||0)===(current.revision||0) && d.created_at>current.created_at))
+        latestDocs.set(d.kind,d);
+    }
+    const kinds = new Set([...latestDocs.values()].filter(d=>d.verified).map(d=>d.kind));
     const covered = new Set(
       p.rules["BR-06"].sp2_coverage_allowed
         ? (a.sp2?.covered_documents || []).filter(
