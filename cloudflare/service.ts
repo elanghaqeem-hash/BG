@@ -20,6 +20,8 @@ import {
   type Row,
 } from "./core.ts";
 import { buildDocumentChecklist } from "./document-checklist.ts";
+import { recordFiveC, reviewFiveC, counterReview, registerCollateral, approveCollateral,
+  reserveCapacity, capacity, requestServicing, requestClosure, confirmClosure } from "./enterprise-controls.ts";
 export const BANK = new Set([
   "AO",
   "ANALYST",
@@ -623,6 +625,33 @@ export class Service {
       role = actor.role,
       inter = a.processing_office !== a.issuing_office;
     switch (cmd) {
+      case "record_5c":
+        recordFiveC(this,actor,a,x);
+        break;
+      case "review_5c":
+        reviewFiveC(this,actor,a,x);
+        break;
+      case "review_counter":
+        counterReview(this,actor,a,x);
+        break;
+      case "register_collateral":
+        registerCollateral(this,actor,a,x);
+        break;
+      case "approve_collateral":
+        approveCollateral(this,actor,a,x);
+        break;
+      case "reserve_limit":
+        reserveCapacity(this,actor,a);
+        break;
+      case "request_servicing":
+        requestServicing(this,actor,a,x);
+        break;
+      case "request_bg_closure":
+        requestClosure(this,actor,a,x);
+        break;
+      case "confirm_bg_closure":
+        confirmClosure(this,actor,a);
+        break;
       case "submit":
         this.role(actor, ["PRINCIPAL", "AO", "BROKER"]);
         this.state(a, "DRAFT");
@@ -724,6 +753,19 @@ export class Service {
       case "bank_underwrite":
         this.role(actor, ["ANALYST"]);
         this.state(a, "SP2KBG_ISSUED");
+        // New structured 5C cases are fail-closed; legacy sandbox applications remain
+        // compatible until the institutional policy activates mandatory 5C.
+        if (a.underwriting_id) {
+          const review = this.s.get("underwritings",a.underwriting_id);
+          req(review.state==="REVIEWED" && review.application_fingerprint===this.fingerprint(a) &&
+            review.recommendation==="LAYAK",
+            "UNDERWRITING","5C harus disetujui dengan rekomendasi layak",409);
+        }
+        if (a.counter_review) {
+          req(a.counter_review.application_fingerprint===this.fingerprint(a) &&
+            a.counter_review.status==="VERIFIED_SANDBOX",
+            "COUNTER","Review KBG tidak lagi valid",409);
+        }
         this.guard(a, ["BR-02", "BR-03", "BR-05", "BR-06"]);
         a.committee_role = committee(a.category, a.amount, p);
         a.state = a.custom_format ? "CUSTOM_FORMAT_REVIEW" : "APPROVAL";
@@ -936,21 +978,32 @@ export class Service {
             (n) => "BR-" + String(n).padStart(2, "0"),
           ),
         );
-        const others = this.s
-          .rows("applications")
-          .filter((r) => ACTIVE.includes(r.state));
-        const total = (field: string, value: string) =>
-          others
-            .filter((r) => r[field] === value)
-            .reduce((sum, r) => sum + money(r.amount), 0n);
+        // A guarantee keeps consuming capacity through all issued states and open claims.
+        // Reservations from *other* applications also consume capacity.
+        const exposure = capacity(this,a);
         req(
-          total("partner", a.partner) + money(a.amount) <=
-            money(p.pks.partner_limit) &&
-            total("principal", a.principal) + money(a.amount) <=
-              money(p.pks.principal_limit),
-          "LIMIT",
-          "Kapasitas penjamin atau Principal tidak cukup",
+          exposure.partner + money(a.amount) <= money(p.pks.partner_limit) &&
+            exposure.principal + money(a.amount) <= money(p.pks.principal_limit),
+          "LIMIT","Kapasitas penjamin atau Principal tidak cukup",
         );
+        const collateral = this.s.rows("collaterals",{application_id:a.id});
+        req(collateral.every(c=>c.state==="VERIFIED" &&
+          c.application_fingerprint===this.fingerprint(a)),
+          "COLLATERAL","Agunan harus diverifikasi dan sesuai revisi transaksi",409);
+        if (a.counter_review) {
+          req(a.counter_review.application_fingerprint===this.fingerprint(a) &&
+            a.counter_review.status==="VERIFIED_SANDBOX" &&
+            a.counter_review.pks_reference===this.s.get("partners",a.partner).pks,
+            "COUNTER","PKS/analisa KBG perlu diperiksa ulang",409);
+        }
+        const reservation = this.s.maybe("limit_reservations",a.id);
+        if (reservation) {
+          req(reservation.status==="RESERVED" &&
+            reservation.application_fingerprint===this.fingerprint(a),
+            "LIMIT","Reservasi tidak lagi valid",409);
+          reservation.status="CONSUMED";
+          reservation.consumed_at=this.iso;
+        }
         const number =
             "BG-" +
             new Date(this.now).getUTCFullYear() +
