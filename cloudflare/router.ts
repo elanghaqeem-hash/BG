@@ -450,6 +450,9 @@ export function route(service: Service, input: Input): Response {
       "DOCUMENT",
       "Hanya teks UTF-8 atau PDF",
     );
+    if(b.kind==="LKN_PHOTOS")
+      req(raw.subarray(0,5).toString()==="%PDF-","DOCUMENT",
+        "Bukti foto LKN harus disatukan dalam PDF (maksimal 2 MB)");
     const d = service.addDocument(
       a,
       app,
