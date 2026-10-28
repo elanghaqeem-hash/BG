@@ -795,6 +795,9 @@ export class Service {
         // compatible until the institutional policy activates mandatory 5C.
         if (a.underwriting_id) {
           const review = this.s.get("underwritings",a.underwriting_id);
+          const currentFinancial=this.doc(a,review.evidence_document,"LAPORAN_KEUANGAN");
+          req(currentFinancial.digest===review.evidence_hash,"DOCUMENT",
+            "Bukti keuangan 5C tidak konsisten",409);
           req(review.state==="REVIEWED" && review.application_fingerprint===this.fingerprint(a) &&
             (review.visit_id||null)===(a.visit_id||null) &&
             (review.standard_analysis_id||null)===(a.standard_analysis_id||null) &&
