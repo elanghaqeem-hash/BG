@@ -5,6 +5,7 @@ import {
 } from "./core.ts";
 import type { Service } from "./service.ts";
 import {unresolvedServicing} from "./servicing-engine.ts";
+import {checkedVisit, currentVisit} from "./visit-reports.ts";
 
 const fiveC = ["character", "capacity", "capital", "collateral", "condition"] as const;
 
@@ -46,6 +47,7 @@ export function policySimulation(svc: Service, actor: Data, policyId: string, fa
 export function recordFiveC(svc: Service, actor: Data, a: Row, x: Data) {
   svc.role(actor, ["ANALYST"]);
   svc.state(a, "SP2KBG_ISSUED");
+  const visit=checkedVisit(svc,a);
   req(x.five_c && typeof x.five_c === "object" && !Array.isArray(x.five_c),
     "UNDERWRITING", "Kelima aspek 5C wajib diisi");
   req(Object.keys(x.five_c).sort().join(",") === [...fiveC].sort().join(","),
@@ -71,6 +73,8 @@ export function recordFiveC(svc: Service, actor: Data, a: Row, x: Data) {
     id:uid(), application_id:a.id, revision:(old?.revision || 0) + 1,
     state:"PENDING_REVIEW", analyst:actor.id, created_at:svc.iso,
     application_fingerprint:svc.fingerprint(a),
+    visit_id:visit?.id||null,
+    visit_review_digest:visit?.review_digest||null,
     evidence_document:evidence.id, evidence_hash:evidence.digest,
     five_c:assessments, financials:fin,
     ratios:{current_ratio:ratio(ca,cl),debt_to_equity:ratio(debt,eq),
@@ -90,6 +94,11 @@ export function reviewFiveC(svc: Service, actor: Data, a: Row, x: Data) {
   req(r.application_id===a.id && r.state==="PENDING_REVIEW", "UNDERWRITING", "Analisa tidak dapat direview");
   req(r.analyst!==actor.id && a.maker!==actor.id, "SOD", "Maker tidak boleh mereview sendiri", 403);
   req(r.application_fingerprint===svc.fingerprint(a), "VERSION", "Data material telah berubah", 409);
+  const latestVisit=currentVisit(svc,a);
+  req((r.visit_id||null)===(latestVisit?.id||null),"VISIT",
+    "LKN berubah; analisis 5C harus diperbarui",409);
+  if(latestVisit)req(checkedVisit(svc,a)?.review_digest===r.visit_review_digest,
+    "VISIT","Dokumen hasil kunjungan tidak konsisten",409);
   req(x.accepted===true || x.accepted===false, "UNDERWRITING", "Keputusan review wajib diisi");
   r.state=x.accepted ? "REVIEWED" : "RETURNED";
   r.checker=actor.id;
