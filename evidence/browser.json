@@ -1,5 +1,6 @@
 {
   "status": "PASS",
+  "runtime": "cloudflare-native-sqlite",
   "checks": [
     "desktop_login_render",
     "principal_login",
@@ -13,6 +14,8 @@
     "fake_qr_browser",
     "android_viewport_393_no_overflow",
     "mobile_long_form_usable",
+    "admin_user_registration_through_ui",
+    "password_change_revokes_session_and_allows_relogin",
     "no_uncaught_browser_errors"
   ],
   "mobile_layout": {
@@ -22,6 +25,5 @@
   },
   "viewport_desktop": "1440x1000",
   "viewport_mobile": "393x852",
-  "real_android_device": false,
-  "runtime": "cloudflare-workerd"
+  "real_android_device": false
 }

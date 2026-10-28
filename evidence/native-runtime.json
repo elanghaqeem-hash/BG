@@ -1,0 +1,18 @@
+{
+  "status": "PASS",
+  "runtime": "cloudflare-workerd-sqlite",
+  "checks": [
+    "unauthenticated_request_rejected",
+    "concurrent_mutations_commit_once",
+    "session_and_application_survive_worker_restart",
+    "encrypted_document_survives_restart",
+    "admin_only_users_api",
+    "cross_site_post_rejected",
+    "audit_chain_verified_after_restart",
+    "logout_revokes_persisted_session",
+    "native_backend_readiness_accurate",
+    "failed_login_rate_limit_persists"
+  ],
+  "database": "isolated disposable SQLite-backed Durable Object",
+  "paid_plan_required": false
+}
