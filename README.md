@@ -2,16 +2,21 @@
 
 Paket development untuk Bank Garansi syariah yang menghubungkan Principal, Bank, Penjamin, Obligee dan Broker. Implementasi menggunakan FastAPI, Next.js, SQLAlchemy, PostgreSQL melalui Compose, SQLite untuk pengujian lokal, dan Temporal untuk sweep SLA durable. Semua integrasi transaksi pada distribusi ini bertanda MOCK/SANDBOX.
 
-## Deploy portal ke Cloudflare Workers
+## Cloudflare Free — portal dan backend native
 
-Konfigurasi Cloudflare tersedia pada root repository. Gunakan Node.js 22+, jalankan
-`npm ci`, lalu `npm run check:deploy` untuk memvalidasi build tanpa publikasi.
-Workers Builds dapat memakai root `/`, build command kosong, dan deploy command
-`npx wrangler deploy`; konfigurasi Wrangler menjalankan build OpenNext secara otomatis.
+Deployment Cloudflare memakai Next.js/OpenNext dan backend TypeScript dengan
+penyimpanan SQLite persisten melalui Durable Objects. Tidak membutuhkan container
+Python, VPS, atau `BG_API_INTERNAL_URL`. Login/logout, menu Pengguna (Admin),
+penggantian password, dokumen terenkripsi dan alur transaksi sandbox tersimpan
+pada backend native. Kode Python tetap tersedia sebagai implementasi referensi.
 
-Backend Python tetap dihosting terpisah dan dihubungkan melalui runtime variable
-`BG_API_INTERNAL_URL` (HTTPS). Portal akan menolak transaksi jika backend belum
-dikonfigurasi. Panduan lengkap: [Cloudflare deployment](docs/CLOUDFLARE_DEPLOYMENT.md).
+Gunakan `npm ci`, `npm test`, `npm run cf-typegen`, `npm run typecheck:worker`,
+dan `npm run check:deploy` untuk memvalidasi build. Workers Builds memakai root
+`/`, build command kosong dan deploy command `npx wrangler deploy`.
+
+Secret identitas awal dan kunci enkripsi harus dipasang secara privat. Panduan:
+[Cloudflare deployment](docs/CLOUDFLARE_DEPLOYMENT.md),
+[verifikasi backend native](docs/NATIVE_BACKEND_VERIFICATION_20261028.md).
 
 ## Yang dapat dijalankan
 

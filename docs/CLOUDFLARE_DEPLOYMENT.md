@@ -1,94 +1,121 @@
-# Cloudflare deployment — BG portal
+# BG on Cloudflare Free
 
-## Scope and root cause
+The Cloudflare deployment now runs the Next.js portal and a native TypeScript
+backend in one Worker. A SQLite-backed Durable Object owns each bank workspace's
+records, document chunks, approval decisions, ledger and audit head. The initial
+workspace is the explicitly labelled `bank-uat` sandbox. There is no public
+parameter that selects another tenant or Durable Object.
 
-The initial GitHub main branch contained only AGENTS.md, so `npx wrangler deploy`
-had neither an entry point nor any application assets. This change restores the
-existing MVP source and adds a buildable Next.js/OpenNext Worker. It preserves
-the FastAPI/SQLAlchemy/PostgreSQL/Temporal backend. It does not convert that
-backend to D1, remove the sandbox restrictions, or activate banking integrations.
+No Python container, external VPS, PostgreSQL service or `BG_API_INTERNAL_URL`
+is needed for this deployment. The original Python implementation is retained as
+a reference and for regression comparison. Cloudflare Free quotas still apply;
+the change does not upgrade the account or create a paid subscription.
 
-## Workers Builds settings
+## Workers Builds
 
 | Setting | Value |
 | --- | --- |
 | Repository | elanghaqeem-hash/BG |
-| Project / Worker name | bg |
-| Root directory | / (repository root) |
-| Build command | Leave empty |
+| Branch | main |
+| Worker | bg |
+| Root directory | / |
+| Build command | Empty |
 | Deploy command | npx wrangler deploy |
-| Node version | 22 or later |
+| Node for builds/tests | 24 recommended |
 
-The root `wrangler.jsonc` runs `npm run build` before deployment. That installs
-the locked frontend dependencies, builds Next.js, and adapts it with OpenNext.
-Wrangler then uploads `frontend/.open-next/worker.js` and its assets. An explicit
-dashboard build command is unnecessary and would duplicate this work.
+The root Wrangler build installs the locked frontend dependencies and runs
+Next.js/OpenNext. `cloudflare/worker.ts` routes `/api/*` to `BankBackend` and other
+requests to the existing portal. Both Wrangler configurations declare the same
+SQLite class migration and binding. Compatibility date stays at 2026-10-27,
+a supported date shared by the installed workerd and Cloudflare runtime.
 
-`frontend/wrangler.jsonc` is the equivalent app-relative configuration consumed
-by OpenNext and local Workers tests. Keep its Worker name, compatibility date,
-flags and assets binding synchronized with the root configuration.
+## One-time setup
 
-## Connect the existing backend
+`node --experimental-strip-types scripts/provision_native.mjs` creates random,
+independent passwords for the 21 sandbox identities, PBKDF2-SHA256 password
+hashes, and an AES-256-GCM document encryption key in ignored local runtime
+storage. It refuses to overwrite an existing secret file. None of these
+credentials belongs in Git, a public issue or a build log.
 
-1. Host the existing FastAPI sandbox on a container-capable environment with
-   persistent database, encryption key and document storage. Use the existing
-   Compose/runbook instructions; bootstrap is sandbox-only.
-2. Configure the published Worker's **runtime** variable `BG_API_INTERNAL_URL`
-   with the backend HTTPS origin. This variable is server-only; do not prefix
-   it with `NEXT_PUBLIC_`. Do not point it back at the portal itself.
-3. Set backend `BG_PUBLIC_WEB_URL` to the portal HTTPS origin for QR links,
-   `BG_ALLOWED_ORIGINS` to the same origin, and `BG_COOKIE_SECURE=1` for HTTPS.
-4. Keep `BG_ALLOW_LOCAL_API` unset in Cloudflare. It only permits local HTTP
-   loopback in the isolated automated test harness.
+Install the values as Worker runtime secrets named `BG_INITIAL_USERS` and
+`BG_ENCRYPTION_KEY`. Keep `BG_MODE=SANDBOX`. On the first request, the backend
+atomically initializes the sandbox master data and users from those hashes.
+Subsequent requests preserve existing users and passwords, even after a deploy.
+A persisted encryption-key fingerprint rejects a changed key. Missing secrets
+return 503; there is no default password or fabricated authentication success.
 
-The Worker preserves dashboard-set variables with `keep_vars: true`. No backend
-endpoint, credentials, encryption key or session secret is committed. A valid
-configuration alone does not prove that the backend is reachable or healthy.
+Credentials and the private key-recovery copy are delivered separately to the
+owner. They are not project source files. Use **Keamanan** after login to change
+a password; all existing sessions for that identity are revoked. Admin can
+register and deactivate users in **Pengguna**. Deactivation revokes sessions.
+
+## Security and transaction boundaries
+
+- Synchronous domain operations execute inside one Durable Object SQLite
+  transaction. Session authorization, version checks, idempotency, ledger writes,
+  workflow changes, document chunks and audit entries commit or roll back together.
+- The bank workspace serializes issuance numbering, cumulative exposure and the
+  audit head. Concurrent requests using one version cannot both advance it.
+- Separate identities enforce approval, document verification and settlement
+  maker–checker controls. Roles and organizations come from stored user records.
+- Session tokens are random and stored as SHA-256 hashes. HTTPS cookies are
+  HttpOnly, Secure and SameSite=Strict. State-changing requests require CSRF;
+  the outer Worker also rejects cross-site browser origins.
+- Login/public endpoints have persisted rate counters. Request bodies are capped
+  at 3 MB. Document plaintext is capped at 2 MB and is encrypted with independent
+  AES-GCM nonces and document-specific authenticated data. Ciphertext is split
+  into small SQLite blob rows and checked against its plaintext SHA-256 on read.
+- Financial arithmetic uses integer cents (BigInt). Journal, approval and audit
+  tables are protected by append-only triggers; numbering and usernames are unique.
+- Durable Object alarms replace the sandbox Temporal sweep for task escalation
+  and activation dates. Sweep retries do not create duplicate notifications.
+
+This is a functional sandbox, not a banking production release. Core banking,
+SLIK/registry lookups, PSrE, payments and insurer integrations remain explicitly
+simulated as in the original MVP. No real BG is issued by this version.
 
 ## Validation
 
 ```bash
 npm ci
 npm test
+npm run cf-typegen
+npm run typecheck:worker
 npm run check:deploy
 npm run typecheck
-npm run cf-typegen
 ```
 
-`check:deploy` exercises the original failing command with `--dry-run`: it builds
-and bundles the Worker without publishing. It requires no production credentials.
-
-Run the existing full sandbox browser suite in the Workers runtime after installing
-backend/frontend dependencies and bootstrapping local sandbox identities:
+For local browser and persistence tests, generate an isolated environment file
+with test-only initial identity hashes and a test encryption key. Store it as
+`runtime/native-test.env`; store the corresponding test passwords as
+`runtime/sandbox-credentials.json`. Use the original fixture username set.
+No production secrets or customer data should be used by this harness.
 
 ```bash
-python scripts/bootstrap.py
 node frontend/node_modules/playwright/cli.js install chromium --only-shell
-BG_WEB_RUNTIME=workers BG_PYTHON=.venv/bin/python node scripts/browser_smoke.cjs
+BG_WEB_RUNTIME=native node scripts/browser_smoke.cjs
+node scripts/native-runtime-check.mjs
 ```
 
-Use an absolute `BG_PYTHON` path if the Python environment is outside the repository.
-The script creates a disposable SQLite database and performs login, draft creation,
-upload, independent verification, role portals, QR rejection and mobile checks.
-Screenshots/logs remain in ignored runtime storage, with no credentials committed.
+The native browser harness skips the Python server and uses a disposable
+SQLite-backed Durable Object directory. The persistence test restarts workerd
+and verifies the same session, application and encrypted document afterwards.
 
-After publishing:
+After publishing, `/api/health/deployment` must report `backend_connectivity=ok`
+and `backend=durable-object-sqlite`. `/api/health` reports persistence and sandbox
+mode. Before login, `/api/auth/me` must return 401. Check login/logout and stored
+role behavior using the separately supplied identities.
 
-- `/` must render the portal login.
-- `/api/health/deployment` reports the portal and whether a backend URL is set;
-  it deliberately does not claim backend connectivity or production readiness.
-- `/api/health` must return the real backend health response.
-- `/api/auth/me` must return 401 before login; login must set an HttpOnly session,
-  and logout must revoke it. Confirm persistence and role isolation on the actual backend.
+## Recovery and scope
 
-Without a backend URL, API calls return 503 `BACKEND_NOT_CONFIGURED`; the login
-page displays an actionable service-unavailable message. There is no mocked
-login or fallback transaction success. The original MVP remains SANDBOX.
+Preserve the Durable Object namespace and the original encryption key. Do not
+replace them as a way to repair a login error. Cloudflare SQL storage recovery
+and a separately stored key are required for a usable restore; a Worker rollback
+alone does not roll back business data. A full backup/restore and real-user UAT
+remain banking production gates.
 
-## Release boundary and rollback
-
-Task changes are pushed to a dedicated branch and proposed through a pull request.
-Merge and live publication remain separate release actions. The initial main
-contained no application deployment to roll back to. For later deployments,
-record the prior Worker version and backend database backup before promoting;
-roll back the Worker version without discarding database or encryption keys.
+Collections are explicitly bounded for this pilot; exceeding the supported
+collection size fails with `CAPACITY` rather than silently dropping records.
+Audit appends use the indexed head and integrity checks use bounded pages.
+Additional bank onboarding, external identity/MFA, institutional policy sign-off,
+production integrations and regulator reporting are separate release work.
