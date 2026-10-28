@@ -4,6 +4,7 @@ import {
   type Data, type Row,
 } from "./core.ts";
 import type { Service } from "./service.ts";
+import {unresolvedServicing} from "./servicing-engine.ts";
 
 const fiveC = ["character", "capacity", "capital", "collateral", "condition"] as const;
 
@@ -177,12 +178,16 @@ export function requestServicing(svc:Service,actor:Data,a:Row,x:Data) {
   svc.state(a,"ACTIVE");
   req(["AMENDMENT","EXTENSION"].includes(x.kind),"SERVICING","Jenis perubahan tidak valid");
   const doc=svc.doc(a,x.document,"AMENDMENT_REQUEST");
-  const previous=svc.s.rows("servicing",{application_id:a.id}).filter(r=>r.status==="PENDING_REVIEW");
-  req(!previous.length,"SERVICING","Perubahan sebelumnya belum diselesaikan",409);
+  req(!unresolvedServicing(svc,a),"SERVICING","Perubahan sebelumnya belum diselesaikan",409);
   const proposed:Data={};
-  if(x.proposed_amount!==undefined) proposed.amount=amount(money(x.proposed_amount));
+  if(x.proposed_amount!==undefined){
+    req(money(x.proposed_amount)>0n,"SERVICING","Nominal harus positif");
+    proposed.amount=amount(money(x.proposed_amount));
+  }
   if(x.proposed_expiry!==undefined) proposed.expires_on=dateOnly(x.proposed_expiry);
   req(Object.keys(proposed).length>0,"SERVICING","Perubahan harus memiliki detail");
+  req(proposed.amount!==a.amount || proposed.expires_on!==a.expires_on,
+    "SERVICING","Tidak terdapat perubahan material",409);
   if(proposed.expires_on) req(proposed.expires_on>=a.expires_on,"SERVICING","Perpanjangan tidak boleh memperpendek masa berlaku");
   const item=svc.s.add("servicing",{id:uid(),application_id:a.id,
     kind:x.kind,document:doc.id,document_hash:doc.digest,
@@ -198,7 +203,7 @@ export function requestClosure(svc:Service,actor:Data,a:Row,x:Data) {
   req(timestamp(g.claim_deadline)<svc.now,"CLOSURE","Masa pengajuan klaim belum berakhir",409);
   req(!svc.s.rows("claims",{application_id:a.id}).some(c=>c.state!=="WITHDRAWN" || c.bank_paid_at),
     "CLOSURE","Masih terdapat klaim atau kewajiban belum selesai",409);
-  req(!svc.s.rows("servicing",{application_id:a.id}).some(s=>s.status==="PENDING_REVIEW"),
+  req(!unresolvedServicing(svc,a),
     "CLOSURE","Terdapat perubahan BG yang belum diselesaikan",409);
   svc.doc(a,x.document,"RELEASE");
   req(!a.closure_request,"CLOSURE","Penutupan sudah diajukan",409);
@@ -215,7 +220,7 @@ export function confirmClosure(svc:Service,actor:Data,a:Row) {
   req(timestamp(g.claim_deadline)<svc.now,"CLOSURE","Periode klaim masih berjalan",409);
   req(!svc.s.rows("claims",{application_id:a.id}).some(c=>c.state!=="WITHDRAWN" || c.bank_paid_at),
     "CLOSURE","Klaim masih terbuka",409);
-  req(!svc.s.rows("servicing",{application_id:a.id}).some(s=>s.status==="PENDING_REVIEW"),
+  req(!unresolvedServicing(svc,a),
     "CLOSURE","Perubahan BG belum selesai",409);
   g.status="CLOSED";g.closed_at=svc.iso;g.closed_by=actor.id;
   const reservation=svc.s.maybe("limit_reservations",a.id);
