@@ -801,6 +801,7 @@ export class Service {
           req(review.state==="REVIEWED" && review.application_fingerprint===this.fingerprint(a) &&
             (review.visit_id||null)===(a.visit_id||null) &&
             (review.standard_analysis_id||null)===(a.standard_analysis_id||null) &&
+            (review.standard_analysis_digest||null)===(checkedStandardAnalysis(this,a)?.review_digest||null) &&
             review.recommendation==="LAYAK",
             "UNDERWRITING","5C harus disetujui dengan rekomendasi layak",409);
         }
