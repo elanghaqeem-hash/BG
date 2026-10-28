@@ -751,3 +751,49 @@ test("native maximum document is chunked below row limits and survives readback"
     422,
   );
 });
+
+
+test("native checklist lists missing, pending, optional, and stage-specific documents", async () => {
+  const f = fixture(), j = new Journey(f);
+  await j.create({bg_type:"PENAWARAN",custom_format:true});
+  let checklist=j.a.document_checklist;
+  assert.ok(checklist);
+  assert.equal(checklist.ready,false);
+  assert.equal(checklist.items.find(d=>d.kind==="NIB").status,"MISSING");
+  assert.equal(checklist.items.find(d=>d.kind==="UNDANGAN_TENDER").status,"MISSING");
+  assert.equal(checklist.items.find(d=>d.kind==="TDR").status,"CONDITIONAL");
+  assert.equal(checklist.items.find(d=>d.kind==="SLIK").status,"UPCOMING");
+  assert.equal(checklist.items.find(d=>d.kind==="FORMAT_APPROVAL").status,"UPCOMING");
+  const act=await j.doc("AKTA_PENDIRIAN","principal",false);
+  await f.login("principal");
+  checklist=(await f.call("/applications/"+j.a.id)).document_checklist;
+  assert.equal(checklist.items.find(d=>d.kind==="AKTA_PENDIRIAN").status,"PENDING");
+  assert.match(checklist.notification,/menunggu verifikasi/);
+  await f.login("compliance");
+  await f.call("/documents/"+act+"/verify",{source_reference:"Akta primer verified"});
+  await f.login("principal");
+  checklist=(await f.call("/applications/"+j.a.id)).document_checklist;
+  assert.equal(checklist.items.find(d=>d.kind==="AKTA_PENDIRIAN").status,"VERIFIED");
+  await f.login("penjamin");
+  const partnerView=await f.call("/applications/"+j.a.id);
+  assert.ok(partnerView.document_checklist.items.every(d=>["SP2KBG","CERTIFICATE","FORMAT_APPROVAL"].includes(d.kind)));
+});
+
+test("native checklist reflects pending SLIK without claiming source verification", async () => {
+  const f=fixture(),j=new Journey(f);
+  await j.create();
+  for(const kind of ["NIB","CONTRACT","KYB"])await j.doc(kind);
+  await j.cmd("submit","principal");
+  const id=await j.doc("SLIK","analyst",false);
+  await f.login("principal");
+  let c=(await f.call("/applications/"+j.a.id)).document_checklist;
+  assert.equal(c.stage,"Pemeriksaan SLIK, DHN dan legal");
+  assert.equal(c.items.find(d=>d.kind==="SLIK").status,"PENDING");
+  assert.ok(c.counts.pending>0);
+  await f.login("compliance");
+  await f.call("/documents/"+id+"/verify",{source_reference:"Hasil SLIK resmi"});
+  await f.login("principal");
+  c=(await f.call("/applications/"+j.a.id)).document_checklist;
+  assert.equal(c.items.find(d=>d.kind==="SLIK").status,"VERIFIED");
+  assert.ok(c.counts.missing>0); // dokumen lain tetap harus dilengkapi
+});

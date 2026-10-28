@@ -374,8 +374,21 @@ export function route(service: Service, input: Input): Response {
     const app = s.get("applications", p[1]);
     service.access(a, app, a.role === "BROKER");
     const allowed: Data = {
-      PRINCIPAL: ["NIB", "CONTRACT", "KYB", "PRINCIPAL_REQUEST", "MANDATE"],
-      BROKER: ["NIB", "CONTRACT", "KYB", "PRINCIPAL_REQUEST"],
+      PRINCIPAL: [
+        "NIB","CONTRACT","KYB","PRINCIPAL_REQUEST","MANDATE",
+        "AKTA_PENDIRIAN","IDENTITAS_PENGURUS","NPWP","TDR",
+        "LAPORAN_KEUANGAN","SIUJK","ASOSIASI_PROFESI","IZIN_LAINNYA",
+        "UNDANGAN_TENDER","PERMOHONAN_BG","PERMOHONAN_KBG",
+        "SP2D_SATKER","SP2D_PERJANJIAN","SP2D_KPPN",
+        "BUKTI_BIAYA","SURAT_KUASA_PEMBLOKIRAN",
+      ],
+      BROKER: [
+        "NIB","CONTRACT","KYB","PRINCIPAL_REQUEST",
+        "AKTA_PENDIRIAN","IDENTITAS_PENGURUS","NPWP","TDR",
+        "LAPORAN_KEUANGAN","SIUJK","ASOSIASI_PROFESI","IZIN_LAINNYA",
+        "UNDANGAN_TENDER","PERMOHONAN_BG","PERMOHONAN_KBG",
+        "SP2D_SATKER","SP2D_PERJANJIAN","SP2D_KPPN",
+      ],
       PENJAMIN: [
         "SP2KBG",
         "FORMAT_APPROVAL",
