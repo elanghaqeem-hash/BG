@@ -1375,3 +1375,25 @@ test("Lampiran 5 permits a third accounting row but never auto-approves marginal
  assert.equal(snapshot.current.status,"PENDING_REVIEW");
  f.sqlite.close();
 });
+
+
+test("5C maker-checker rejects superseded financial statements before independent review",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ await j.doc("LAPORAN_KEUANGAN","analyst");
+ assert.equal((await j.cmd("review_5c","mpo",{
+  accepted:true,reason:"Bukti keuangan versi lama tidak dapat diperiksa"},409)).code,"DOCUMENT");
+ const current=await f.call("/applications/"+j.a.id+"/enterprise");
+ assert.equal(current.underwriting.state,"PENDING_REVIEW");
+ f.sqlite.close();
+});
+test("5C bank underwriting rejects superseded financial statements after checker approval",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ await j.cmd("review_5c","mpo",{
+  accepted:true,reason:"Analisis sebelumnya disetujui dari dokumen lama"});
+ await j.doc("LAPORAN_KEUANGAN","analyst");
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"DOCUMENT");
+ assert.equal(j.a.state,"SP2KBG_ISSUED");
+ f.sqlite.close();
+});
