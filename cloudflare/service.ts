@@ -569,6 +569,7 @@ export class Service {
       out.documents = out.documents.filter((d: Data) =>
         [
           "SP2KBG",
+          "COUNTER_ENDORSEMENT",
           "CONTRACT",
           "DRAFT_BG",
           "FORMAT_APPROVAL",
