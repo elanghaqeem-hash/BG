@@ -186,7 +186,7 @@ export function requestServicing(svc:Service,actor:Data,a:Row,x:Data) {
   }
   if(x.proposed_expiry!==undefined) proposed.expires_on=dateOnly(x.proposed_expiry);
   req(Object.keys(proposed).length>0,"SERVICING","Perubahan harus memiliki detail");
-  req(proposed.amount!==a.amount || proposed.expires_on!==a.expires_on,
+  req((proposed.amount??a.amount)!==a.amount || (proposed.expires_on??a.expires_on)!==a.expires_on,
     "SERVICING","Tidak terdapat perubahan material",409);
   if(proposed.expires_on) req(proposed.expires_on>=a.expires_on,"SERVICING","Perpanjangan tidak boleh memperpendek masa berlaku");
   const item=svc.s.add("servicing",{id:uid(),application_id:a.id,
