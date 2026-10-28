@@ -7,13 +7,7 @@
  * persyaratan final. Tidak melakukan validasi isi dokumen/OCR.
  */
 type Evidence = {kind: string; verified: boolean; created_at?: string; id?: string};
-type Application = {
-  bg_type?: string;
-  processing_office?: string;
-  issuing_office?: string;
-  custom_format?: boolean;
-  state?: string;
-};
+type Application = Record<string, unknown>;
 type Requirement = {
   kind: string;
   label: string;
@@ -78,7 +72,7 @@ function phaseOf(state: string): number {
   return 5;
 }
 export function buildDocumentChecklist(a: Application, docs: Evidence[], role: string) {
-  const stage=phaseOf(a.state??'DRAFT');
+  const stage=phaseOf(typeof a.state==='string'?a.state:'DRAFT');
   const allowed = role==="PENJAMIN"
     ? new Set(["SP2KBG","CERTIFICATE","FORMAT_APPROVAL"])
     : null;
