@@ -951,7 +951,7 @@ test("BG amendment requires risk, guarantor and independent bank approval withou
   await f.login("mpo");
   let items=await f.call("/applications/"+j.a.id+"/servicing");
   assert.equal(items[0].status,"PARTNER_ENDORSED");
-  assert.equal((await j.cmd("partner_endorse","principal",{servicing_id:id},403)).code,"FORBIDDEN");
+  assert.equal((await j.cmd("partner_endorse","principal",{servicing_id:id,document:"not-owned",reference:"END-2026-0002",cover_amount:"3500000000",cover_until:"2027-04-27"},403)).code,"FORBIDDEN");
   await j.cmd("approve_servicing","mpo",{servicing_id:id});
   items=await f.call("/applications/"+j.a.id+"/servicing");
   assert.equal(items[0].status,"APPROVED_PENDING_ISSUANCE");
@@ -992,7 +992,7 @@ test("amendment cannot exceed current principal limit even with valid approvals"
   const f=fixture(),j=new Journey(f);
   await j.active();
   const id=await reviewedServicing(j,"11000000000");
-  assert.equal((await j.cmd("approve_servicing","mpo",{servicing_id:id},422)).code,"LIMIT");
+  assert.equal((await j.cmd("approve_servicing","mpo",{servicing_id:id},409)).code,"LIMIT");
   const s=new Store(f.db);
   assert.equal(s.get("servicing",id).status,"PARTNER_ENDORSED");
   assert.equal(s.maybe("limit_reservations","servicing:"+id),undefined);
