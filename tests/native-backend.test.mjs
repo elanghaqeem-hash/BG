@@ -1202,3 +1202,17 @@ test("LKN rejects malformed location and external-application photo evidence",as
  assert.equal(new Store(f.db).rows("visits").length,0);
  f.sqlite.close();
 });
+
+test("LKN photo bundles reject ordinary text and require a PDF container",async()=>{
+ const f=fixture(),j=new Journey(f);
+ await j.create();
+ await f.login("ao");
+ const response=await f.call("/applications/"+j.a.id+"/documents",{
+  kind:"LKN_PHOTOS",source_reference:"Kunjungan nasabah RM",
+  content_base64:Buffer.from("Foto yang dinyatakan tanpa PDF").toString("base64"),
+ },422);
+ assert.equal(response.code,"DOCUMENT");
+ assert.equal(new Store(f.db).rows("documents",{application_id:j.a.id})
+   .filter(d=>d.kind==="LKN_PHOTOS").length,0);
+ f.sqlite.close();
+});
