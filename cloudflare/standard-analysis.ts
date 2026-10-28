@@ -82,8 +82,6 @@ export function recordStandardAnalysis(svc:Service,actor:Data,a:Row,x:Data) {
   const project=svc.doc(a,x.project_document,"CONTRACT");
   const financial=svc.doc(a,x.financial_document,"LAPORAN_KEUANGAN");
   const slik=svc.doc(a,x.slik_document,"SLIK");
-  req(x.checklist_complete===true,"STANDARD_ANALYSIS",
-    "Checklist belum dinyatakan lengkap (tidak setara verifikasi otomatis)");
   const proposed=amount(money(x.guarantee_amount));
   req(proposed===a.amount,"STANDARD_ANALYSIS",
     "Nilai Pengujian Bank Garansi harus konsisten dengan permohonan",409);
@@ -103,8 +101,6 @@ export function recordStandardAnalysis(svc:Service,actor:Data,a:Row,x:Data) {
   });
   req(new Set(profits.map(p=>p.year)).size===profits.length,
     "STANDARD_ANALYSIS","Tahun laba harus berbeda");
-  req(profits.every(p=>p.year>=Number(jakartaDate(svc.now).slice(0,4))-5),
-    "STANDARD_ANALYSIS","Riwayat laba wajib periode terakhir (maksimal 5 tahun)");
   req(typeof x.additional_collateral==="string","STANDARD_ANALYSIS",
     "Nilai agunan tambahan wajib dinyatakan (nol jika tidak ada)");
   const extraCollateral=amount(money(x.additional_collateral));
@@ -115,8 +111,6 @@ export function recordStandardAnalysis(svc:Service,actor:Data,a:Row,x:Data) {
     "Jumlah proyek tahun lalu tidak boleh melebihi total proyek selesai");
   const knownCurrency=amount(money(x.project_value));
   const valueYear=amount(money(x.last_year_project_value));
-  req(money(knownCurrency)>=money(proposed),"STANDARD_ANALYSIS",
-    "Nilai jaminan melampaui nilai proyek; perlu pengecualian kebijakan tersendiri");
   const support=x.bank_support==="ADA"?str(x.bank_support_details,"Bentuk dukungan bank",8,500):"";
   const result=svc.s.add("standard_analyses",{
     id:uid(),application_id:a.id,revision:(current?.revision||0)+1,
@@ -130,7 +124,8 @@ export function recordStandardAnalysis(svc:Service,actor:Data,a:Row,x:Data) {
       funding:x.funding_source,funding_other:x.funding_source==="LAINNYA"?str(x.funding_other,"Sumber lain"):null,
       contract_reference:str(x.contract_reference,"Nomor dokumen",5,200),contract_date:sourceDate,
       completion_months:num(x.completion_months,"Lama pekerjaan (bulan)",1200),
-      guarantee_amount:proposed,guarantee_type:x.guarantee_type,
+      guarantee_amount:proposed,amount_exceeds_project:money(proposed)>money(knownCurrency),
+      guarantee_type:x.guarantee_type,
       guarantee_other:x.guarantee_type==="LAINNYA"?str(x.guarantee_other,"Jenis jaminan lainnya"):null},
     character:{principal:x.customer_relationship,business_years:businessYears,
       management:str(x.management,"Susunan pengurus/manajemen",8,2000),
@@ -180,6 +175,8 @@ export function reviewStandardAnalysis(svc:Service,actor:Data,a:Row,x:Data) {
   req((checkedVisit(svc,a)?.id||null)===(row.visit_id||null),
     "VISIT","LKN telah berubah",409);
   req(typeof x.accepted==="boolean","STANDARD_ANALYSIS","Keputusan wajib boolean");
+  if(x.accepted)req(row.checklist_complete===true,"STANDARD_ANALYSIS",
+    "Checker tidak dapat menyetujui formulir dengan checklist tidak lengkap");
   const reviewNote=str(x.reason,"Alasan review",8,2000);
   row.status=x.accepted?"REVIEWED":"RETURNED";
   row.reviewer=actor.id;row.reviewed_at=svc.iso;row.review_reason=reviewNote;
