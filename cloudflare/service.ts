@@ -19,6 +19,7 @@ import {
   type Data,
   type Row,
 } from "./core.ts";
+import { buildDocumentChecklist } from "./document-checklist.ts";
 export const BANK = new Set([
   "AO",
   "ANALYST",
@@ -527,6 +528,9 @@ export class Service {
       ...Object.fromEntries(fields.map((k) => [k, a[k] ?? null])),
       documents: [],
     };
+    if (["PRINCIPAL","BROKER","PENJAMIN"].includes(actor.role) || BANK.has(actor.role)) {
+      out.document_checklist = buildDocumentChecklist(a, this.docs(a), actor.role);
+    }
     if (
       BANK.has(actor.role) ||
       ["PRINCIPAL", "PENJAMIN"].includes(actor.role)
