@@ -919,3 +919,115 @@ test("collateral cannot be registered using a non-collateral document",async()=>
   assert.equal(new Store(f.db).rows("collaterals").length,0);
   f.sqlite.close();
 });
+
+
+async function reviewedServicing(j,proposed_amount="3500000000"){
+  const f=j.f;
+  const requestDocument=await j.doc("AMENDMENT_REQUEST","principal");
+  await j.cmd("request_servicing","principal",{
+    kind:"AMENDMENT",document:requestDocument,
+    proposed_amount,reason:"Perubahan nilai kontrak kerja resmi"});
+  await f.login("mpo");
+  const before=await f.call("/applications/"+j.a.id+"/servicing");
+  assert.equal(before.at(-1).status,"PENDING_REVIEW");
+  const id=before.at(-1).id;
+  for(const kind of ["SLIK","DHN","LEGAL_CHECK","MAP_BG"])
+    await j.doc(kind,"analyst");
+  await j.cmd("review_servicing","analyst",{
+    servicing_id:id,collectibility:1,pulled_at:new Date(f.now).toISOString(),
+    screening_clear:true,ubo_verified:true,recommendation:"LAYAK",
+    narrative:"SLIK, DHN, aspek hukum dan MAP-BG diperiksa ulang"});
+  const cert=await j.doc("COUNTER_ENDORSEMENT","penjamin");
+  await j.cmd("partner_endorse","penjamin",{
+    servicing_id:id,document:cert,reference:"END-2026-0001",
+    cover_amount:proposed_amount,cover_until:"2027-04-27"});
+  return id;
+}
+test("BG amendment requires risk, guarantor and independent bank approval without changing original",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const originalNumber=j.a.bg_number, originalAmount=j.a.amount, originalDate=j.a.expires_on;
+  const id=await reviewedServicing(j);
+  await f.login("mpo");
+  let items=await f.call("/applications/"+j.a.id+"/servicing");
+  assert.equal(items[0].status,"PARTNER_ENDORSED");
+  assert.equal((await j.cmd("partner_endorse","principal",{servicing_id:id},403)).code,"FORBIDDEN");
+  await j.cmd("approve_servicing","mpo",{servicing_id:id});
+  items=await f.call("/applications/"+j.a.id+"/servicing");
+  assert.equal(items[0].status,"APPROVED_PENDING_ISSUANCE");
+  assert.deepEqual(items[0].approved_roles,["MPO"]);
+  assert.equal(items[0].effective,false);
+  assert.equal(j.a.amount,originalAmount);
+  assert.equal(j.a.expires_on,originalDate);
+  assert.equal(j.a.bg_number,originalNumber);
+  const db=new Store(f.db);
+  assert.equal(db.get("limit_reservations","servicing:"+id).amount,"1500000000.00");
+  assert.equal(db.get("limit_reservations","servicing:"+id).status,"RESERVED");
+  const token=await f.call("/applications/"+j.a.id+"/verification-link");
+  const verified=await f.call("/public/verify/"+token.token);
+  assert.equal(verified.amount,originalAmount);
+  assert.equal(verified.expires_on,originalDate);
+  assert.equal((await j.cmd("request_servicing","principal",{
+    kind:"AMENDMENT",document:await j.doc("AMENDMENT_REQUEST","principal"),
+    proposed_amount:"3600000000",reason:"Perubahan tambahan nominal kerja"},409)).code,"SERVICING");
+  f.sqlite.close();
+});
+test("approved but not effected amendment can be cancelled by Legal and releases delta atomically",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const id=await reviewedServicing(j);
+  await j.cmd("approve_servicing","mpo",{servicing_id:id});
+  const cancellation=await j.doc("CANCELLATION","legal");
+  assert.equal((await j.cmd("cancel_approved_servicing","mpo",{
+    servicing_id:id,document:cancellation,reason:"Batal karena perubahan kontrak"},403)).code,"FORBIDDEN");
+  await j.cmd("cancel_approved_servicing","legal",{
+    servicing_id:id,document:cancellation,reason:"Persetujuan perubahan dibatalkan oleh bank"});
+  const s=new Store(f.db);
+  assert.equal(s.get("servicing",id).status,"CANCELLED");
+  assert.equal(s.get("limit_reservations","servicing:"+id).status,"RELEASED");
+  assert.equal(j.a.state,"ACTIVE");
+  f.sqlite.close();
+});
+test("amendment cannot exceed current principal limit even with valid approvals",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const id=await reviewedServicing(j,"11000000000");
+  assert.equal((await j.cmd("approve_servicing","mpo",{servicing_id:id},422)).code,"LIMIT");
+  const s=new Store(f.db);
+  assert.equal(s.get("servicing",id).status,"PARTNER_ENDORSED");
+  assert.equal(s.maybe("limit_reservations","servicing:"+id),undefined);
+  assert.equal(s.rows("approvals").filter(d=>d.servicing_id===id).length,0);
+  f.sqlite.close();
+});
+test("servicing rejects stale pre-request SLIK and missing new control documents",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  for(const kind of ["SLIK","DHN","LEGAL_CHECK","MAP_BG"])await j.doc(kind,"analyst");
+  const requestDocument=await j.doc("AMENDMENT_REQUEST","principal");
+  await j.cmd("request_servicing","principal",{
+    kind:"EXTENSION",document:requestDocument,
+    proposed_expiry:"2027-09-30",reason:"Tambahan masa penyelesaian proyek"});
+  const ids=await f.call("/applications/"+j.a.id+"/servicing");
+  f.now+=60_000;
+  assert.equal((await j.cmd("review_servicing","analyst",{
+    servicing_id:ids[0].id,collectibility:1,pulled_at:new Date(f.now).toISOString(),
+    screening_clear:true,ubo_verified:true,recommendation:"LAYAK",
+    narrative:"Informasi risiko terverifikasi"},409)).code,"DOCUMENT");
+  assert.equal(new Store(f.db).get("servicing",ids[0].id).status,"PENDING_REVIEW");
+  f.sqlite.close();
+});
+test("public QR reports closed BG as authentic but not active",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const link=await f.call("/applications/"+j.a.id+"/verification-link");
+  const doc=await j.doc("RELEASE","mpo");
+  f.now=Date.parse("2027-07-01T07:00:00Z");
+  await j.cmd("request_bg_closure","mpo",{document:doc});
+  await j.cmd("confirm_bg_closure","compliance");
+  const check=await f.call("/public/verify/"+link.token);
+  assert.equal(check.authentic,true);
+  assert.equal(check.valid,false);
+  assert.equal(check.status,"AUTHENTIC_CLOSED");
+  assert.equal(check.claim_window_open,false);
+  f.sqlite.close();
+});
