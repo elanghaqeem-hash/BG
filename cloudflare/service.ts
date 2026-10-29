@@ -49,6 +49,12 @@ export const BANK = new Set([
   "WORKER",
 ]);
 export const OPS = ["MPO", "SUPPORT", "MPO_KPO", "KADEP_SUPPORT"];
+/** Bank transaction readers; system administration is not a data-access role. */
+const BANK_DOCUMENT_ROLES = new Set([
+  "AO", "ANALYST", "COMPLIANCE", "MPO", "SUPPORT", "MPO_KPO",
+  "KADEP_SUPPORT", "GH_BISNIS", "DIREKSI", "FINANCE",
+  "LITIGATION", "LEGAL", "AUDIT",
+]);
 const ACTIVE = [
   "BG_ISSUED",
   "KONTRA_BG_ISSUED",
@@ -538,7 +544,7 @@ export class Service {
       ...Object.fromEntries(fields.map((k) => [k, a[k] ?? null])),
       documents: [],
     };
-    if (["PRINCIPAL","BROKER","PENJAMIN"].includes(actor.role) || BANK.has(actor.role)) {
+    if (["PRINCIPAL","BROKER","PENJAMIN"].includes(actor.role) || BANK_DOCUMENT_ROLES.has(actor.role)) {
       const checklist = buildDocumentChecklist(a, this.docs(a), actor.role);
       // The checklist also contains UUIDs, verification status and bank-only
       // work items. Do not let an external party enumerate internal evidence.
@@ -572,11 +578,11 @@ export class Service {
       }
     }
     if (
-      BANK.has(actor.role) ||
+      BANK_DOCUMENT_ROLES.has(actor.role) ||
       ["PRINCIPAL", "PENJAMIN"].includes(actor.role)
     ) {
       // Internal underwriting and bank decisions never leave the bank scope.
-      if (BANK.has(actor.role)) out.workflow = structuredClone(a);
+      if (BANK_DOCUMENT_ROLES.has(actor.role)) out.workflow = structuredClone(a);
       out.documents = this.docs(a)
         .filter((d) =>
           actor.role !== "PRINCIPAL" ||
@@ -1590,7 +1596,7 @@ export class Service {
         403,
       );
     req(
-      !["ADMIN", "MONITOR", "WORKER"].includes(actor.role),
+      !["ADMIN", "MONITOR", "CONFIG_CHECKER", "WORKER"].includes(actor.role),
       "FORBIDDEN",
       "Tidak berwenang membaca isi dokumen",
       403,
