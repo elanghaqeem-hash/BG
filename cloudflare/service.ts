@@ -1,4 +1,4 @@
-import { PRINCIPAL_VISIBLE_DOCUMENT_KINDS } from "./document-scope.ts";
+import { PRINCIPAL_VISIBLE_DOCUMENT_KINDS, BROKER_VISIBLE_DOCUMENT_KINDS } from "./document-scope.ts";
 import {
   Store,
   DomainError,
@@ -539,7 +539,37 @@ export class Service {
       documents: [],
     };
     if (["PRINCIPAL","BROKER","PENJAMIN"].includes(actor.role) || BANK.has(actor.role)) {
-      out.document_checklist = buildDocumentChecklist(a, this.docs(a), actor.role);
+      const checklist = buildDocumentChecklist(a, this.docs(a), actor.role);
+      // The checklist also contains UUIDs, verification status and bank-only
+      // work items. Do not let an external party enumerate internal evidence.
+      const scope = actor.role === "PRINCIPAL"
+        ? PRINCIPAL_VISIBLE_DOCUMENT_KINDS
+        : actor.role === "BROKER"
+          ? BROKER_VISIBLE_DOCUMENT_KINDS
+          : null;
+      if (scope) {
+        const items = checklist.items.filter((item) => scope.includes(item.kind));
+        const actionable = items.filter((item) => item.required && item.status !== "UPCOMING");
+        const missing = actionable.filter((item) => item.status === "MISSING").length;
+        const pending = actionable.filter((item) => item.status === "PENDING").length;
+        out.document_checklist = {
+          ...checklist,
+          items,
+          counts: {
+            required: actionable.length,
+            verified: actionable.filter((item) => item.status === "VERIFIED").length,
+            missing,
+            pending,
+            upcoming: items.filter((item) => item.status === "UPCOMING").length,
+          },
+          note: "Hanya persyaratan dokumen dalam kewenangan pengguna; pemeriksaan dan keputusan internal bank tidak ditampilkan.",
+          notification: missing + pending
+            ? `Terdapat ${missing} dokumen belum diunggah dan ${pending} dokumen menunggu verifikasi pada kewenangan Anda.`
+            : "Dokumen yang dapat Anda akses telah ditinjau; status keputusan bank mengikuti proses internal.",
+        };
+      } else {
+        out.document_checklist = checklist;
+      }
     }
     if (
       BANK.has(actor.role) ||
@@ -1550,7 +1580,7 @@ export class Service {
         "CERTIFICATE",
       ],
       OBLIGEE: ["BG", "CLAIM", "WITHDRAWAL", "DELIVERY"],
-      BROKER: ["NIB", "CONTRACT", "PRINCIPAL_REQUEST"],
+      BROKER: BROKER_VISIBLE_DOCUMENT_KINDS,
     };
     if (scopes[actor.role])
       req(
