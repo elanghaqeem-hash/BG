@@ -19,6 +19,13 @@ function recovery(svc:Service,c:Row){
     "RECOVERY","Referensi klaim/pemulihan tidak konsisten",409);
   return row;
 }
+function checkedRecovery(svc:Service,a:Row,c:Row){
+  const row=recovery(svc,c);
+  const document=svc.doc(a,row.basis_document,"RECOVERY_BASIS");
+  req(document.digest===row.basis_digest,"DOCUMENT",
+    "Bukti dasar pemulihan telah diganti, lakukan review ulang",409);
+  return row;
+}
 function event(svc:Service,actor:Data,c:Row,kind:string,detail:Data){
   return svc.s.add("recovery_events",{
     id:uid(),application_id:c.application_id,claim_id:c.id,
@@ -32,6 +39,20 @@ function reviewedActions(svc:Service,c:Row){
   const reviews=events.filter(x=>x.kind==="ACTION_REVIEWED");
   return {actions,reviews};
 }
+function verifyActionEvidence(svc:Service,a:Row,c:Row){
+  const {actions,reviews}=reviewedActions(svc,c);
+  for(const action of actions){
+    // Every action has its own immutable source. Do not require the latest
+    // application-wide RECOVERY_ACTION kind; that would invalidate distinct,
+    // legitimate actions merely because another action was uploaded later.
+    const document=svc.doc(a,action.document);
+    req(document.kind==="RECOVERY_ACTION" &&
+      document.digest===action.document_digest,"DOCUMENT",
+      "Bukti tindak lanjut tidak sesuai snapshot immutable",409);
+  }
+  return {actions,reviews};
+}
+
 export function openRecovery(svc:Service,actor:Data,a:Row,c:Row,x:Data){
   svc.role(actor,["LITIGATION","LEGAL"]);
   req(!!c.bank_paid_at && c.bank_payment?.mode==="MOCK",
@@ -79,7 +100,7 @@ export function openRecovery(svc:Service,actor:Data,a:Row,c:Row,x:Data){
 }
 export function reviewRecovery(svc:Service,actor:Data,a:Row,c:Row,x:Data){
   svc.role(actor,["LEGAL","COMPLIANCE"]);
-  const row=recovery(svc,c);
+  const row=checkedRecovery(svc,a,c);
   req(row.status==="PENDING_LEGAL_REVIEW","RECOVERY","Kasus belum menunggu review",409);
   req(row.opened_by!==actor.id && a.maker!==actor.id,
     "SOD","Pembuat pengajuan tidak dapat memeriksa dirinya sendiri",403);
@@ -100,7 +121,7 @@ export function reviewRecovery(svc:Service,actor:Data,a:Row,c:Row,x:Data){
 }
 export function recordRecoveryAction(svc:Service,actor:Data,a:Row,c:Row,x:Data){
   svc.role(actor,["LITIGATION"]);
-  const row=recovery(svc,c);
+  const row=checkedRecovery(svc,a,c);
   req(row.status==="TRACKING_ONLY","RECOVERY","Review hukum belum selesai",409);
   req(["DEMAND","NEGOTIATION","COURT","PAYMENT_EVIDENCE","OTHER"].includes(x.action_type),
     "RECOVERY","Jenis tindak lanjut tidak valid");
@@ -124,14 +145,15 @@ export function reviewRecoveryAction(svc:Service,actor:Data,a:Row,c:Row,x:Data){
   svc.role(actor,["LEGAL","COMPLIANCE"]);
   const row=recovery(svc,c);
   req(row.status==="TRACKING_ONLY","RECOVERY","Kasus belum dapat diperiksa",409);
-  const {actions,reviews}=reviewedActions(svc,c);
+  const {actions,reviews}=verifyActionEvidence(svc,a,c);
   const original=actions.find(action=>action.id===x.action_id);
   req(!!original,"RECOVERY","Tindak lanjut tidak ditemukan",404);
   req(!reviews.some(x=>x.action_id===original.id),"RECOVERY",
     "Tindak lanjut sudah diperiksa",409);
   req(original.actor!==actor.id,"SOD","Pembuat dan reviewer harus berbeda",403);
-  const doc=svc.doc(a,original.document,"RECOVERY_ACTION");
-  req(doc.digest===original.document_digest,"DOCUMENT",
+  const doc=svc.doc(a,original.document);
+  req(doc.kind==="RECOVERY_ACTION" &&
+    doc.digest===original.document_digest,"DOCUMENT",
     "Bukti tindak lanjut sudah berubah",409);
   req(typeof x.accepted==="boolean","RECOVERY","Keputusan wajib boolean");
   event(svc,actor,c,"ACTION_REVIEWED",{
@@ -145,7 +167,7 @@ export function requestRecoveryClosure(svc:Service,actor:Data,a:Row,c:Row,x:Data
   svc.role(actor,["LITIGATION"]);
   const row=recovery(svc,c);
   req(row.status==="TRACKING_ONLY","RECOVERY","Status kasus belum dapat ditutup",409);
-  const {actions,reviews}=reviewedActions(svc,c);
+  const {actions,reviews}=verifyActionEvidence(svc,a,c);
   req(actions.length>0 && actions.every(act=>reviews.some(r=>r.action_id===act.id)) &&
     reviews.some(review=>review.accepted===true),
     "RECOVERY","Seluruh tindak lanjut harus direview dan minimal satu disetujui",409);
@@ -162,10 +184,11 @@ export function requestRecoveryClosure(svc:Service,actor:Data,a:Row,c:Row,x:Data
 }
 export function confirmRecoveryClosure(svc:Service,actor:Data,a:Row,c:Row,x:Data){
   svc.role(actor,["LEGAL","COMPLIANCE"]);
-  const row=recovery(svc,c);
+  const row=checkedRecovery(svc,a,c);
   req(row.status==="CLOSURE_PENDING","RECOVERY","Tidak ada penutupan yang menunggu",409);
   req(row.closure_maker!==actor.id && row.opened_by!==actor.id,
     "SOD","Maker tidak boleh menutup kasus sendiri",403);
+  verifyActionEvidence(svc,a,c);
   const doc=svc.doc(a,row.closure_document,"RECOVERY_RESOLUTION");
   req(doc.digest===row.closure_digest,"DOCUMENT","Bukti penutupan tidak valid",409);
   req(x.accepted===true||x.accepted===false,"RECOVERY","Keputusan wajib boolean");
