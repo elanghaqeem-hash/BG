@@ -234,6 +234,27 @@ export function validatePolicy(p: Data) {
     "POLICY",
     "Kalender tidak valid",
   );
+  // These controls are opt-in for legacy sandbox policy snapshots. A bank's
+  // approved policy must explicitly authorize them before any operational use.
+  if (p.analysis_controls !== undefined) {
+    const controls = p.analysis_controls;
+    requireValue(controls && typeof controls === "object" &&
+      !Array.isArray(controls) &&
+      Object.keys(controls).every(k => [
+        "require_standard_analysis", "require_five_c", "require_counter_review",
+        "max_profit_age_years",
+      ].includes(k)), "POLICY", "Konfigurasi kontrol analisa tidak valid");
+    for (const k of ["require_standard_analysis", "require_five_c",
+      "require_counter_review"])
+      requireValue(controls[k] === undefined || typeof controls[k] === "boolean",
+        "POLICY", "Flag kontrol "+k+" harus boolean");
+    requireValue(!controls.require_five_c || controls.require_standard_analysis === true,
+      "POLICY", "5C wajib memerlukan Formulir Standar Analisa wajib");
+    const age = controls.max_profit_age_years;
+    requireValue(age === undefined || age === null ||
+      (Number.isInteger(age) && age >= 1 && age <= 10), "POLICY",
+      "Umur maksimum riwayat laba harus 1–10 tahun atau null");
+  }
   splitUjrah("0", p);
   businessDue(Date.now(), p.rules["BR-14"].business_days, p.calendar);
   businessDue(Date.now(), p.rules["BR-18"].business_days, p.calendar);
