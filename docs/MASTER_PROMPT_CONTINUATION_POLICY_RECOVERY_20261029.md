@@ -25,12 +25,12 @@
 - After a **MOCK** recorded bank claim payout, authorized Litigation/Legal can open a `BANK_RECOURSE_ASSESSMENT` with latest verified `RECOVERY_BASIS` document. `SUBROGATION_ASSESSMENT` additionally requires a recorded contra-payment *simulation*, but never confers legal subrogation.
 - Independent Legal/Compliance reviewer confirms or returns basis. Case status: `PENDING_LEGAL_REVIEW` → `TRACKING_ONLY` or `RETURNED`. A returned case can be resubmitted with a new verified evidence revision.
 - Litigation records `DEMAND`, `NEGOTIATION`, `COURT`, `PAYMENT_EVIDENCE`, or `OTHER` events backed by verified `RECOVERY_ACTION` documents. Legal/Compliance independently accepts/rejects each immutable action. A reported payment amount is **not recognized cash**, does not post to journal and cannot exceed claim amount.
-- An administrative closure requires all actions reviewed and at least one independently accepted action, latest `RECOVERY_RESOLUTION` document, a Litigation maker and a distinct Legal/Compliance checker. The result is `CLOSED_TRACKING_ONLY`; it is **not** release of legal obligations, successful debt recovery, or a core-bank settlement.
+- An administrative closure requires the latest reviewed recovery basis, all action evidence bound by immutable digests, all actions reviewed and at least one independently accepted action, latest `RECOVERY_RESOLUTION` document, a Litigation maker and a distinct Legal/Compliance checker. The result is `CLOSED_TRACKING_ONLY`; it is **not** release of legal obligations, successful debt recovery, or a core-bank settlement.
 - New bank-only `GET /api/claims/:id/recovery`; existing versioned, idempotent claim command route exposes:
   `open_recovery`, `review_recovery`, `record_recovery_action`, `review_recovery_action`,
   `request_recovery_closure`, `confirm_recovery_closure`.
 - Frontend adds a Recovery/Subrogation panel to claims cards for authorized bank users, with source-document selections, verification status, and event history.
-- Automated new regression scenarios: prevent premature recovery / unearned subrogation, independent legal review and scoped access, zero-cash action/closure, superseded/cross-application evidence. Latest CI outcome must be checked at the last commit.
+- Automated recovery regression scenarios (six): premature recovery / unearned subrogation, independent legal review and scoped access, zero-cash action/closure, superseded/cross-application evidence, replacement of a reviewed legal basis, and multiple distinct immutable action documents. Latest CI outcome must be checked at the last commit.
 
 **Important interpretation:** The 2022–2023 BG institutional source material covers claims and recourse/subrogation concepts, but the exact digital statuses, fields, legal evidence threshold, and authorities above are **software design proposals**, not approved clause-level regulatory obligations. They need Legal, Risk, Compliance, DPS, and bank policy approval.
 
