@@ -37,6 +37,8 @@ export const TABLES = [
   "servicing",
   "visits",
   "standard_analyses",
+  "recovery_cases",
+  "recovery_events",
   "anchors",
 ] as const;
 export type Table = (typeof TABLES)[number];
@@ -407,7 +409,7 @@ export class Store {
   }
   delete(table: Table, id: string) {
     requireValue(
-      !["audit_log", "journals", "approvals"].includes(table),
+      !["audit_log", "journals", "approvals", "recovery_events"].includes(table),
       "IMMUTABLE",
       "Catatan bersifat append-only",
       409,
@@ -457,7 +459,7 @@ export function initializeSchema(db: Database) {
   db.run(
     "CREATE TABLE IF NOT EXISTS request_limits(key TEXT NOT NULL,minute INTEGER NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(key,minute))",
   );
-  for (const table of ["audit_log", "journals", "approvals"])
+  for (const table of ["audit_log", "journals", "approvals", "recovery_events"])
     for (const operation of ["UPDATE", "DELETE"])
       db.run(
         `CREATE TRIGGER IF NOT EXISTS ${table}_${operation.toLowerCase()}_deny BEFORE ${operation} ON ${table} BEGIN SELECT RAISE(ABORT,'append only'); END`,
@@ -476,6 +478,10 @@ export function initializeSchema(db: Database) {
     ["servicing", "application_id"],
     ["visits", "application_id"],
     ["standard_analyses", "application_id"],
+    ["recovery_cases", "application_id"],
+    ["recovery_cases", "claim_id"],
+    ["recovery_events", "application_id"],
+    ["recovery_events", "recovery_id"],
   ])
     db.run(
       `CREATE INDEX IF NOT EXISTS ${table}_${field}_index ON ${table}(json_extract(data,'$.${field}'))`,
