@@ -22,5 +22,10 @@
     "playwright": "^1.56.1",
     "typescript": "^5.9.0",
     "wrangler": "4.153.0"
+  },
+  "overrides": {
+    "@node-minify/core": {
+      "glob": "10.5.0"
+    }
   }
 }
