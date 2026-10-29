@@ -125,7 +125,7 @@ export function reviewRecoveryAction(svc:Service,actor:Data,a:Row,c:Row,x:Data){
   const row=recovery(svc,c);
   req(row.status==="TRACKING_ONLY","RECOVERY","Kasus belum dapat diperiksa",409);
   const {actions,reviews}=reviewedActions(svc,c);
-  const original=actions.find(x=>x.id===x.action_id);
+  const original=actions.find(action=>action.id===x.action_id);
   req(!!original,"RECOVERY","Tindak lanjut tidak ditemukan",404);
   req(!reviews.some(x=>x.action_id===original.id),"RECOVERY",
     "Tindak lanjut sudah diperiksa",409);
