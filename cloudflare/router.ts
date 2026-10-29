@@ -361,6 +361,36 @@ export function route(service: Service, input: Input): Response {
   }
   if (matches("applications", "*") && method === "GET")
     return json(service.view(a, s.get("applications", p[1])));
+  // Role-scoped portal inbox; external email/WhatsApp delivery is not implied.
+  if (matches("applications", "*", "messages") && ["GET","POST"].includes(method)) {
+    const app=s.get("applications",p[1]);
+    service.access(a,app);
+    const sender=BANK.has(a.role)?"BANK":String(a.role);
+    req(["BANK","PRINCIPAL","PENJAMIN","BROKER"].includes(sender),
+      "FORBIDDEN","Peran ini tidak dapat memakai komunikasi pengajuan",403);
+    const all: Data[]=Array.isArray(app.portal_messages)?app.portal_messages:[];
+    const visible=()=>all.filter((m:Data)=>sender==="BANK"||m.from===sender||m.to===sender);
+    if(!post) return json(visible());
+    fields(b,["recipient","topic","message"],["recipient","topic","message"]);
+    const recipient=str(b.recipient,1,20);
+    const allowed: Record<string,string[]>={
+      BANK:["PRINCIPAL","PENJAMIN","BROKER"],
+      PRINCIPAL:["BANK","PENJAMIN"],
+      PENJAMIN:["BANK","PRINCIPAL"],
+      BROKER:["BANK","PRINCIPAL"]
+    };
+    req(allowed[sender].includes(recipient),"RECIPIENT","Tujuan pesan tidak berwenang",403);
+    const topic=str(b.topic,1,30);
+    req(["KLARIFIKASI","KELENGKAPAN_DOKUMEN","JADWAL_KUNJUNGAN","LAINNYA"].includes(topic),
+      "TOPIC","Kategori pesan tidak dikenal",422);
+    const message=str(b.message,3,1000).trim();
+    req(message.length>=3,"MESSAGE","Isi pesan terlalu singkat",422);
+    req(all.length<100,"LIMIT","Batas pesan aplikasi sandbox tercapai",429);
+    const item={id:uid(),from:sender,to:recipient,topic,message,at:service.iso};
+    all.push(item);app.portal_messages=all;
+    service.audit(a,"PortalMessageCreated",app.id,{message_id:item.id,recipient,topic});
+    return json(item,201);
+  }
   if (matches("applications", "*", "commands", "*") && post) {
     fields(
       b,
