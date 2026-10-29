@@ -239,3 +239,11 @@
 .principal-journey small{font-size:10px;line-height:1.4;display:block;margin-top:5px}
 @media(max-width:1000px){.principal-journey ol{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:560px){.principal-journey ol{grid-template-columns:repeat(2,minmax(0,1fr))}.bg-form-section{padding:14px 12px}.bg-form-section .form-grid{grid-template-columns:1fr}}
+
+.bg-messages{max-height:300px;overflow:auto;padding:4px 0;margin-bottom:20px}
+.bg-message{border:1px solid #e2eaee;border-radius:8px;margin-bottom:9px;padding:12px 15px;background:#fafdfd}
+.bg-message>div{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.bg-message strong{font-size:11px}.bg-message small{font-size:10px;color:#71868f}
+.bg-message span{display:block;font-size:10px;color:#477c87;margin-top:6px}
+.bg-message p{white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0 0;font-size:12px;line-height:1.6}
+.bg-contact textarea{width:100%;min-height:85px}
