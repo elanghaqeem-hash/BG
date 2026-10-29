@@ -626,6 +626,49 @@ export class Service {
     });
     return result;
   }
+  /** Consistent fail-closed evidence gate at underwriting and at issuance.
+   *  Older sandbox applications remain compatible unless their pinned policy
+   *  explicitly enables mandatory controls. A REVIEWED evidence revision is
+   *  always revalidated even when it was not mandatory to create one.
+   */
+  underwritingReadiness(a: Row) {
+    const controls = this.policy(a).analysis_controls || {};
+    if (controls.require_standard_analysis)
+      req(!!a.standard_analysis_id, "STANDARD_ANALYSIS",
+        "Policy mewajibkan Formulir Standar Analisa yang telah disetujui", 409);
+    const standard = checkedStandardAnalysis(this, a);
+    checkedVisit(this, a); // LKN conditional; if submitted, must be approved.
+    if (controls.require_five_c)
+      req(!!a.underwriting_id, "UNDERWRITING",
+        "Policy mewajibkan review 5C sebelum underwriting", 409);
+    if (a.underwriting_id) {
+      const review = this.s.get("underwritings", a.underwriting_id);
+      req(review.application_id === a.id, "UNDERWRITING",
+        "Analisa 5C tidak terkait permohonan", 409);
+      const financial = this.doc(a, review.evidence_document, "LAPORAN_KEUANGAN");
+      req(financial.digest === review.evidence_hash, "DOCUMENT",
+        "Bukti keuangan 5C sudah berubah; analisis ulang diperlukan", 409);
+      req(review.state === "REVIEWED" &&
+        review.application_fingerprint === this.fingerprint(a) &&
+        (review.visit_id || null) === (a.visit_id || null) &&
+        (review.standard_analysis_id || null) === (standard?.id || null) &&
+        (review.standard_analysis_digest || null) === (standard?.review_digest || null) &&
+        review.recommendation === "LAYAK", "UNDERWRITING",
+        "Review 5C harus konsisten dan merekomendasikan Layak", 409);
+    }
+    if (controls.require_counter_review)
+      req(!!a.counter_review, "COUNTER",
+        "Policy mewajibkan verifikasi PKS dan review KBG", 409);
+    if (a.counter_review) {
+      const review = a.counter_review;
+      const document = this.doc(a, review.pks_document, "PKS");
+      req(document.digest === review.document_hash &&
+        review.application_fingerprint === this.fingerprint(a) &&
+        review.status === "VERIFIED_SANDBOX" &&
+        review.pks_reference === this.s.get("partners", a.partner).pks,
+        "COUNTER", "Verifikasi PKS/KBG sudah berubah dan harus ditelaah ulang", 409);
+    }
+  }
   command(actor: Data, a: Row, cmd: string, x: Data) {
     const p = this.policy(a),
       role = actor.role,
@@ -789,27 +832,7 @@ export class Service {
       case "bank_underwrite":
         this.role(actor, ["ANALYST"]);
         this.state(a, "SP2KBG_ISSUED");
-        checkedStandardAnalysis(this,a);
-        checkedVisit(this,a); // Optional visit; if recorded, branch review must be complete.
-        // New structured 5C cases are fail-closed; legacy sandbox applications remain
-        // compatible until the institutional policy activates mandatory 5C.
-        if (a.underwriting_id) {
-          const review = this.s.get("underwritings",a.underwriting_id);
-          const currentFinancial=this.doc(a,review.evidence_document,"LAPORAN_KEUANGAN");
-          req(currentFinancial.digest===review.evidence_hash,"DOCUMENT",
-            "Bukti keuangan 5C tidak konsisten",409);
-          req(review.state==="REVIEWED" && review.application_fingerprint===this.fingerprint(a) &&
-            (review.visit_id||null)===(a.visit_id||null) &&
-            (review.standard_analysis_id||null)===(a.standard_analysis_id||null) &&
-            (review.standard_analysis_digest||null)===(checkedStandardAnalysis(this,a)?.review_digest||null) &&
-            review.recommendation==="LAYAK",
-            "UNDERWRITING","5C harus disetujui dengan rekomendasi layak",409);
-        }
-        if (a.counter_review) {
-          req(a.counter_review.application_fingerprint===this.fingerprint(a) &&
-            a.counter_review.status==="VERIFIED_SANDBOX",
-            "COUNTER","Review KBG tidak lagi valid",409);
-        }
+        this.underwritingReadiness(a);
         this.guard(a, ["BR-02", "BR-03", "BR-05", "BR-06"]);
         a.committee_role = committee(a.category, a.amount, p);
         a.state = a.custom_format ? "CUSTOM_FORMAT_REVIEW" : "APPROVAL";
@@ -1016,6 +1039,7 @@ export class Service {
           "Policy tidak lagi efektif",
         );
         req(a.expires_on >= jakartaDate(this.now), "TENOR", "BG kedaluwarsa");
+        this.underwritingReadiness(a);
         this.guard(
           a,
           [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 16].map(
@@ -1034,12 +1058,6 @@ export class Service {
         req(collateral.every(c=>c.state==="VERIFIED" &&
           c.application_fingerprint===this.fingerprint(a)),
           "COLLATERAL","Agunan harus diverifikasi dan sesuai revisi transaksi",409);
-        if (a.counter_review) {
-          req(a.counter_review.application_fingerprint===this.fingerprint(a) &&
-            a.counter_review.status==="VERIFIED_SANDBOX" &&
-            a.counter_review.pks_reference===this.s.get("partners",a.partner).pks,
-            "COUNTER","PKS/analisa KBG perlu diperiksa ulang",409);
-        }
         const reservation = this.s.maybe("limit_reservations",a.id);
         if (reservation) {
           req(reservation.status==="RESERVED" &&
