@@ -1501,3 +1501,109 @@ test("new financial evidence cannot bypass approved form and 5C when issuing a s
  assert.equal(new Store(f.db).rows("guarantees").length,0);
  f.sqlite.close();
 });
+
+
+async function paidClaimJourney(){
+ const f=fixture(),j=new Journey(f);
+ await j.active();
+ let claim=await j.claim();
+ claim=await j.claimcmd(claim,"report","mpo");
+ claim=await j.claimcmd(claim,"approve_claim","mpo",{instrument_conditions_met:true});
+ claim=await j.claimcmd(claim,"pay_bank","finance");
+ assert.equal(claim.bank_payment.mode,"MOCK");
+ return {f,j,claim};
+}
+async function openedRecovery(f,j,claim){
+ const basis=await j.doc("RECOVERY_BASIS","litigation");
+ claim=await j.claimcmd(claim,"open_recovery","litigation",{
+   kind:"BANK_RECOURSE_ASSESSMENT",document:basis,
+   reason:"Asesmen pemulihan atas bank claim simulasi berdasarkan bukti primer"});
+ return {claim,basis};
+}
+
+test("recovery does not open before bank payout or invent a legal subrogation",async()=>{
+ const f=fixture(),j=new Journey(f);
+ await j.active();
+ let claim=await j.claim();
+ const basis=await j.doc("RECOVERY_BASIS","litigation");
+ assert.equal((await j.claimcmd(claim,"open_recovery","litigation",{
+  kind:"BANK_RECOURSE_ASSESSMENT",document:basis,
+  reason:"Analisa awal atas hak dan risiko bank belum lengkap"},409)).code,"RECOVERY");
+ claim=await j.claimcmd(claim,"report","mpo");
+ claim=await j.claimcmd(claim,"approve_claim","mpo",{instrument_conditions_met:true});
+ claim=await j.claimcmd(claim,"pay_bank","finance");
+ assert.equal((await j.claimcmd(claim,"open_recovery","litigation",{
+  kind:"SUBROGATION_ASSESSMENT",document:basis,
+  reason:"Subrogasi memerlukan bukti pembayaran pihak penjamin"},409)).code,"RECOVERY");
+ assert.equal(new Store(f.db).rows("recovery_cases").length,0);
+ f.sqlite.close();
+});
+
+test("bank recovery legal review is independently authorized, evidentiary and bank-only",async()=>{
+ const {f,j,claim:initial}=await paidClaimJourney();
+ let {claim}=await openedRecovery(f,j,initial);
+ await f.login("principal");
+ assert.equal((await f.call("/claims/"+claim.id+"/recovery",undefined,403)).code,"FORBIDDEN");
+ assert.equal((await j.claimcmd(claim,"review_recovery","litigation",{
+  accepted:true,reason:"Maker mencoba melakukan penilaian sendiri"},403)).code,"FORBIDDEN");
+ claim=await j.claimcmd(claim,"review_recovery","legal",{
+  accepted:true,reason:"Bukti dasar diteliti Legal untuk monitoring saja"});
+ await f.login("legal");
+ const view=await f.call("/claims/"+claim.id+"/recovery");
+ assert.equal(view.current.status,"TRACKING_ONLY");
+ assert.equal(view.events.length,2);
+ assert.equal(view.accounting_posted,false);
+ assert.equal(view.legal_rights_verified,false);
+ assert.equal(new Store(f.db).rows("journals").filter(x=>String(x.id).includes("recovery")).length,0);
+ assert.throws(()=>f.sqlite.exec("UPDATE recovery_events SET data='{}'"));
+ assert.throws(()=>f.sqlite.exec("DELETE FROM recovery_events"));
+ f.sqlite.close();
+});
+
+test("recovery actions require independent evidence review and administrative closure does not post cash",async()=>{
+ const {f,j,claim:initial}=await paidClaimJourney();
+ let {claim}=await openedRecovery(f,j,initial);
+ claim=await j.claimcmd(claim,"review_recovery","legal",{
+  accepted:true,reason:"Evaluasi dasar pemulihan disetujui untuk monitoring"});
+ const doc=await j.doc("RECOVERY_ACTION","litigation");
+ claim=await j.claimcmd(claim,"record_recovery_action","litigation",{
+  action_type:"PAYMENT_EVIDENCE",document:doc,reported_amount:"50000000",
+  reason:"Dokumen yang diklaim sebagai bukti pembayaran harus diuji manual"});
+ const snap=await f.call("/claims/"+claim.id+"/recovery");
+ const action=snap.events.find(e=>e.kind==="ACTION_RECORDED");
+ assert.equal(action.financial_recognition,false);
+ assert.equal(action.reported_amount,"50000000.00");
+ const resolution=await j.doc("RECOVERY_RESOLUTION","litigation");
+ assert.equal((await j.claimcmd(claim,"request_recovery_closure","litigation",{
+   document:resolution,reason:"Penutupan ditolak sebelum review action"},409)).code,"RECOVERY");
+ claim=await j.claimcmd(claim,"review_recovery_action","legal",{
+   action_id:action.id,accepted:true,reason:"Bukti diterima untuk catatan administratif saja"});
+ assert.equal((await j.claimcmd(claim,"review_recovery_action","legal",{
+   action_id:action.id,accepted:true,reason:"Review ganda tidak boleh dilakukan"},409)).code,"RECOVERY");
+ const countBefore=new Store(f.db).rows("journals").length;
+ claim=await j.claimcmd(claim,"request_recovery_closure","litigation",{
+  document:resolution,reason:"Penutupan monitoring diusulkan dan akan dicek Legal"});
+ claim=await j.claimcmd(claim,"confirm_recovery_closure","legal",{
+  accepted:true,reason:"Pemeriksaan administrasi selesai tanpa pengakuan kas"});
+ const final=await f.call("/claims/"+claim.id+"/recovery");
+ assert.equal(final.current.status,"CLOSED_TRACKING_ONLY");
+ assert.equal(final.current.accounting_posted,false);
+ assert.equal(new Store(f.db).rows("journals").length,countBefore);
+ f.sqlite.close();
+});
+
+test("recovery superseded documents and foreign-application evidence fail closed",async()=>{
+ const {f,j,claim:initial}=await paidClaimJourney();
+ const other=new Journey(f);
+ await other.create({project_name:"Proyek lain untuk uji isolasi bukti"});
+ const wrong=await other.doc("RECOVERY_BASIS","litigation");
+ assert.equal((await j.claimcmd(initial,"open_recovery","litigation",{
+  kind:"BANK_RECOURSE_ASSESSMENT",document:wrong,
+  reason:"Dokumen dari permohonan lain harus ditolak"},422)).code,"DOCUMENT");
+ let {claim}=await openedRecovery(f,j,initial);
+ await j.doc("RECOVERY_BASIS","litigation");
+ assert.equal((await j.claimcmd(claim,"review_recovery","legal",{
+  accepted:true,reason:"Tidak boleh menyetujui dokumen yang sudah diganti"},409)).code,"DOCUMENT");
+ assert.equal(new Store(f.db).get("recovery_cases",claim.recovery_id).status,"PENDING_LEGAL_REVIEW");
+ f.sqlite.close();
+});
