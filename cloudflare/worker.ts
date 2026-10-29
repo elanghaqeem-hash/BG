@@ -1,4 +1,5 @@
 import portal from "../frontend/.open-next/worker.js";
+import { sandboxRuntimePermitted } from "./runtime-mode.ts";
 export { BankBackend } from "./bank-backend.ts";
 export default {
   async fetch(
@@ -6,6 +7,14 @@ export default {
     env: CloudflareEnv,
     ctx: ExecutionContext,
   ): Promise<Response> {
+    // Fail closed: this MVP is only permitted to serve its SANDBOX runtime.
+    // Merely changing an environment variable cannot activate banking production.
+    if (!sandboxRuntimePermitted(env.BG_MODE)) {
+      return Response.json(
+        { code: "RELEASE_BLOCKED", detail: "BG operational runtime is not enabled." },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {
       if (request.method === "POST") {
