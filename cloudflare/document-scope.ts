@@ -35,3 +35,10 @@ export const PRINCIPAL_VISIBLE_DOCUMENT_KINDS: readonly string[] = Object.freeze
   "CERTIFICATE",
   "DELIVERY",
 ]);
+
+/** A Broker may only read these principal-provided source documents. */
+export const BROKER_VISIBLE_DOCUMENT_KINDS: readonly string[] = Object.freeze([
+  "NIB",
+  "CONTRACT",
+  "PRINCIPAL_REQUEST",
+]);
