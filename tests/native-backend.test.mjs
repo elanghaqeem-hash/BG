@@ -1397,3 +1397,107 @@ test("5C bank underwriting rejects superseded financial statements after checker
  assert.equal(j.a.state,"SP2KBG_ISSUED");
  f.sqlite.close();
 });
+
+
+async function activateAnalysisControls(f,controls) {
+  await f.login("admin");
+  const configuration=structuredClone(policy);
+  configuration.analysis_controls=controls;
+  const proposed=await f.call("/policies",{configuration},201);
+  await f.login("config_checker");
+  await f.call("/policies/"+proposed.id+"/approve",{});
+  assert.equal(new Store(f.db).get("policies",proposed.id).status,"ACTIVE");
+  return proposed.id;
+}
+
+test("institutional underwriting control flags are validated before policy proposal",async()=>{
+ const f=fixture();
+ await f.login("admin");
+ for(const controls of [
+  {require_five_c:true},
+  {require_standard_analysis:"yes"},
+  {require_standard_analysis:true,max_profit_age_years:0},
+  {require_counter_review:true,unknown_override:true},
+ ]) {
+  assert.equal((await f.call("/policies",{
+   configuration:{...structuredClone(policy),analysis_controls:controls}},422)).code,"POLICY");
+ }
+ assert.equal(new Store(f.db).rows("policies").length,1);
+ f.sqlite.close();
+});
+
+test("approved pinned policy makes standard analysis and independently reviewed 5C mandatory",async()=>{
+ const f=fixture();
+ const id=await activateAnalysisControls(f,{
+  require_standard_analysis:true,require_five_c:true,max_profit_age_years:2});
+ const {j,docs}=await standardJourney(f);
+ assert.equal(new Store(f.db).get("applications",j.a.id).policy_id,id);
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"STANDARD_ANALYSIS");
+ await acceptedStandard(j,docs);
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"UNDERWRITING");
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"UNDERWRITING");
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"Pemeriksa independen menyatakan data lengkap"});
+ await j.cmd("bank_underwrite","analyst");
+ assert.equal(j.a.state,"APPROVAL");
+ f.sqlite.close();
+});
+
+test("financial-year recency is configurable, not invented from Lampiran 5",async()=>{
+ const f=fixture();
+ await activateAnalysisControls(f,{
+  require_standard_analysis:true,max_profit_age_years:2});
+ const {j,docs}=await standardJourney(f);
+ const old=standardPayload(j,docs,{profit_history:[
+  {year:2022,profit:"100000"},{year:2021,profit:"50000"}]});
+ assert.equal((await j.cmd("record_standard_analysis","ao",old,409)).code,"STANDARD_ANALYSIS");
+ await j.cmd("record_standard_analysis","ao",standardPayload(j,docs,{profit_history:[
+  {year:2024,profit:"100000"},{year:2023,profit:"50000"}]}));
+ await j.cmd("review_standard_analysis","mpo",{
+  accepted:true,reason:"Laporan sesuai kebijakan maksimum usia dua tahun"});
+ await j.cmd("bank_underwrite","analyst");
+ assert.equal(j.a.state,"APPROVAL");
+ f.sqlite.close();
+});
+
+test("mandatory counter review requires latest PKS and rechecks it at formal sandbox issue",async()=>{
+ const f=fixture();
+ await activateAnalysisControls(f,{require_counter_review:true});
+ const {j}=await standardJourney(f);
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"COUNTER");
+ const document=await j.doc("PKS","compliance");
+ const partner=new Store(f.db).get("partners",j.a.partner);
+ await j.cmd("review_counter","compliance",{
+   scheme:"CAC",pks_reference:partner.pks,pks_document:document});
+ await j.cmd("bank_underwrite","analyst");
+ await j.cmd("approve","mpo");
+ if(j.a.committee_role)await j.cmd("approve",j.a.committee_role==="GH_BISNIS"?"gh":"direksi");
+ await j.cmd("sign_mkp","mpo");
+ await j.cmd("sign_akad","principal");
+ await j.cmd("sign_akad","mpo");
+ await j.cmd("collect_fee","finance");
+ await j.doc("PKS","compliance"); // superseding a reviewed PKS invalidates authorization
+ assert.equal((await j.cmd("issue","mpo",{},409)).code,"DOCUMENT");
+ assert.equal(new Store(f.db).rows("guarantees").length,0);
+ f.sqlite.close();
+});
+
+test("new financial evidence cannot bypass approved form and 5C when issuing a sandbox BG",async()=>{
+ const f=fixture();
+ await activateAnalysisControls(f,{require_standard_analysis:true,require_five_c:true});
+ const {j,docs}=await standardJourney(f);
+ await acceptedStandard(j,docs);
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"Formulir serta 5C dinyatakan konsisten"});
+ await j.cmd("bank_underwrite","analyst");
+ await j.cmd("approve","mpo");
+ if(j.a.committee_role)await j.cmd("approve",j.a.committee_role==="GH_BISNIS"?"gh":"direksi");
+ await j.cmd("sign_mkp","mpo");
+ await j.cmd("sign_akad","principal");
+ await j.cmd("sign_akad","mpo");
+ await j.cmd("collect_fee","finance");
+ await j.doc("LAPORAN_KEUANGAN","analyst");
+ assert.equal((await j.cmd("issue","mpo",{},409)).code,"DOCUMENT");
+ assert.equal(new Store(f.db).rows("guarantees").length,0);
+ f.sqlite.close();
+});
