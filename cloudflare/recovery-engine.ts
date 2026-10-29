@@ -146,8 +146,9 @@ export function requestRecoveryClosure(svc:Service,actor:Data,a:Row,c:Row,x:Data
   const row=recovery(svc,c);
   req(row.status==="TRACKING_ONLY","RECOVERY","Status kasus belum dapat ditutup",409);
   const {actions,reviews}=reviewedActions(svc,c);
-  req(actions.length>0 && actions.every(act=>reviews.some(r=>r.action_id===act.id)),
-    "RECOVERY","Semua tindak lanjut harus mendapat review",409);
+  req(actions.length>0 && actions.every(act=>reviews.some(r=>r.action_id===act.id)) &&
+    reviews.some(review=>review.accepted===true),
+    "RECOVERY","Seluruh tindak lanjut harus direview dan minimal satu disetujui",409);
   const document=svc.doc(a,x.document,"RECOVERY_RESOLUTION");
   row.closure_document=document.id;
   row.closure_digest=document.digest;
