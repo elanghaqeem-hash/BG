@@ -13,7 +13,8 @@
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "typecheck": "npm --prefix frontend run typecheck",
     "cf-typegen": "wrangler types --config frontend/wrangler.jsonc --env-interface CloudflareEnv --include-runtime=false worker-configuration.d.ts",
-    "typecheck:worker": "tsc -p tsconfig.worker.json"
+    "typecheck:worker": "tsc -p tsconfig.worker.json",
+    "check:release-preflight": "node scripts/check-release-preflight.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261027.1",
