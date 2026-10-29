@@ -16,6 +16,7 @@ import {
 } from "./core.ts";
 import { Service, BANK, OPS, randomToken } from "./service.ts";
 import { enterpriseSnapshot, policySimulation } from "./enterprise-controls.ts";
+import { recoverySnapshot } from "./recovery-engine.ts";
 import {servicingListing} from "./servicing-engine.ts";
 import {visitSnapshot} from "./visit-reports.ts";
 import {standardAnalysisSnapshot} from "./standard-analysis.ts";
@@ -614,6 +615,11 @@ export function route(service: Service, input: Input): Response {
       }),
     );
   }
+  if (matches("claims", "*", "recovery") && method === "GET") {
+    const claim = s.get("claims", p[1]);
+    return json(recoverySnapshot(service,a,
+      s.get("applications",claim.application_id),claim));
+  }
   if (matches("claims", "*", "commands", "*") && post) {
     fields(
       b,
@@ -790,6 +796,12 @@ function validateCommand(command: string, x: Data) {
     withdraw_servicing: ["servicing_id","reason"],
     cancel_approved_servicing: ["servicing_id","document","reason"],
     request_bg_closure: ["document"],
+    open_recovery: ["kind","document","reason"],
+    review_recovery: ["accepted","reason"],
+    record_recovery_action: ["action_type","document","reason"],
+    review_recovery_action: ["action_id","accepted","reason"],
+    request_recovery_closure: ["document","reason"],
+    confirm_recovery_closure: ["accepted","reason"],
   };
   for (const field of required[command] || [])
     req(
@@ -807,6 +819,7 @@ function validateCommand(command: string, x: Data) {
     "pks_document",
     "collateral_id",
     "servicing_id",
+    "action_id",
     "binding_reference",
     "to",
     "decision",
