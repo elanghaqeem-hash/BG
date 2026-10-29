@@ -59,6 +59,10 @@ test("Principal never receives internal bank workflow, SLIK, MKP or internal evi
     const visible = principalView.documents.map((d) => d.kind);
     assert.ok(visible.includes("NIB"));
     assert.ok(visible.includes("DRAFT_BG"));
+    const checklistKinds = principalView.document_checklist.items.map((x) => x.kind);
+    assert.ok(checklistKinds.includes("NIB"));
+    assert.ok(!checklistKinds.includes("SLIK"));
+    assert.ok(!checklistKinds.includes("MKP"));
     for (const doc of internal) {
       assert.equal(visible.includes(doc.kind), false, doc.kind + " leaked in list");
       assert.equal(JSON.stringify(principalView).includes(doc.id), false, doc.kind + " ID leaked in response");
