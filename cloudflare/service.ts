@@ -514,6 +514,7 @@ export class Service {
     this.access(actor, a);
     const fields = [
       "project_name",
+      "project_reference","project_source","project_value","project_start_on","project_end_on","guarantee_scheme",
       "amount",
       "currency",
       "bg_type",
@@ -542,12 +543,16 @@ export class Service {
     if (["PRINCIPAL","BROKER","PENJAMIN"].includes(actor.role) || BANK.has(actor.role)) {
       out.document_checklist = buildDocumentChecklist(a, this.docs(a), actor.role);
     }
-    if (
-      BANK.has(actor.role) ||
-      ["PRINCIPAL", "PENJAMIN"].includes(actor.role)
-    ) {
-      out.workflow = structuredClone(a);
-      out.documents = this.docs(a).map((d) => ({
+    if (BANK.has(actor.role) || ["PRINCIPAL", "PENJAMIN"].includes(actor.role)) {
+      if (BANK.has(actor.role)) out.workflow = structuredClone(a);
+      out.documents = this.docs(a).filter(d => actor.role !== "PRINCIPAL" || [
+        "AMENDMENT_REQUEST","NIB","CONTRACT","KYB","PRINCIPAL_REQUEST","MANDATE",
+        "AKTA_PENDIRIAN","IDENTITAS_PENGURUS","NPWP","TDR","LAPORAN_KEUANGAN",
+        "SIUJK","ASOSIASI_PROFESI","IZIN_LAINNYA","UNDANGAN_TENDER",
+        "PERMOHONAN_BG","PERMOHONAN_KBG","FORMAT_TEMPLATE","SP2D_SATKER",
+        "SP2D_PERJANJIAN","SP2D_KPPN","BUKTI_BIAYA","SURAT_KUASA_PEMBLOKIRAN",
+        "DRAFT_BG","MKP","AKAD","BG","CERTIFICATE","DELIVERY"
+      ].includes(d.kind)).map((d) => ({
         id: d.id,
         kind: d.kind,
         sha256: d.digest,

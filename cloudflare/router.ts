@@ -314,6 +314,7 @@ export function route(service: Service, input: Input): Response {
         "mandate",
         "product",
         "justification",
+        "project_reference","project_source","project_value","project_start_on","project_end_on","guarantee_scheme",
       ],
       [
         "principal",
@@ -328,6 +329,13 @@ export function route(service: Service, input: Input): Response {
       ],
     );
     str(b.project_name);
+    if (b.project_reference !== undefined) str(b.project_reference,0,120);
+    if (b.project_source !== undefined) req(b.project_source === "SELF_DECLARED","PROJECT","Sumber data proyek eksternal belum terintegrasi");
+    if (b.guarantee_scheme !== undefined) req(b.guarantee_scheme === "COUNTER_BG","SCHEME","Skema setoran jaminan / surety langsung belum didukung",422);
+    if (b.project_value !== undefined) req(Number.isFinite(Number(b.project_value)) && Number(b.project_value)>0,"PROJECT","Nilai proyek tidak valid");
+    for(const field of ["project_start_on","project_end_on"]) if(b[field] !== undefined)
+      req(typeof b[field]==="string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(b[field]),"PROJECT","Tanggal proyek tidak valid");
+    if(b.project_start_on && b.project_end_on) req(b.project_end_on>=b.project_start_on,"PROJECT","Tanggal akhir proyek mendahului awal",422);
     if (b.custom_format !== undefined)
       req(
         typeof b.custom_format === "boolean",
