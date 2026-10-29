@@ -45,7 +45,7 @@ export function detectUploadedFormat(bytes: Uint8Array): EvidenceFormat {
     invalid("JPEG tidak berisi dimensi gambar yang valid");
   }
   try {
-    new TextDecoder("utf-8",{fatal:true}).decode(bytes);
+    new TextDecoder("utf-8",{fatal:true,ignoreBOM:false}).decode(bytes);
     if(!bytes.includes(0)) return {mime:"text/plain",extension:"txt"};
   } catch {}
   return invalid("Hanya teks UTF-8, PDF, JPG dan PNG yang didukung");
