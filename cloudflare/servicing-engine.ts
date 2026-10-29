@@ -150,7 +150,10 @@ export function approveServicing(svc:Service,actor:Data,a:Row,x:Data) {
     const existing=svc.s.rows("guarantees")
       .filter(g=>g.status!=="CLOSED" && g.application_id!==a.id)
       .map(g=>svc.s.get("applications",g.application_id));
-    const reserved=svc.s.rows("limit_reservations").filter(q=>q.status==="RESERVED");
+    // Count only unrelated reservations. The original BG is already included below;
+    // its initial pre-issuance reservation must not consume capacity twice.
+    const reserved=svc.s.rows("limit_reservations").filter(q=>
+      q.status==="RESERVED" && q.application_id!==a.id);
     const current=(field:string,value:string)=>existing.filter(q=>q[field]===value)
       .reduce((v,q)=>v+money(q.amount),0n)+
       reserved.filter(q=>q[field]===value).reduce((v,q)=>v+money(q.amount),0n);
