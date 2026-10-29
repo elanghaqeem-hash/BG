@@ -6,7 +6,7 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "build": "npm --prefix frontend ci && npm --prefix frontend run build:cloudflare",
+    "build": "npm run check:release-preflight && npm --prefix frontend ci && npm --prefix frontend run build:cloudflare",
     "deploy": "wrangler deploy",
     "preview": "wrangler dev",
     "check:deploy": "wrangler deploy --dry-run",
