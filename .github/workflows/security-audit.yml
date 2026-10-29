@@ -1,0 +1,41 @@
+name: BG dependency audit
+on:
+  push:
+    branches:
+      - main
+      - 'hardening/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - name: Audit root lockfile (full tree)
+        run: |
+          mkdir -p evidence/security
+          npm audit --json > evidence/security/root-audit.json || true
+      - name: Audit frontend lockfile (full tree)
+        run: npm --prefix frontend audit --json > evidence/security/frontend-audit.json || true
+      - name: Summarize vulnerabilities and available fixes
+        run: node scripts/report-npm-audit.mjs evidence/security/root-audit.json evidence/security/frontend-audit.json
+      - name: Retain machine-readable evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bg-dependency-audit
+          path: evidence/security/*-audit.json
+          retention-days: 7
