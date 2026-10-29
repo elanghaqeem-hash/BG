@@ -22,6 +22,7 @@ import {visitSnapshot} from "./visit-reports.ts";
 import {standardAnalysisSnapshot} from "./standard-analysis.ts";
 import { IDENTITIES } from "./bootstrap.ts";
 import QRCode from "qrcode";
+import { detectUploadedFormat } from "./upload-validation.ts";
 export type Input = {
   method: string;
   path: string[];
@@ -397,7 +398,7 @@ export function route(service: Service, input: Input): Response {
         "AKTA_PENDIRIAN","IDENTITAS_PENGURUS","NPWP","TDR",
         "LAPORAN_KEUANGAN","SIUJK","ASOSIASI_PROFESI","IZIN_LAINNYA",
         "UNDANGAN_TENDER","PERMOHONAN_BG","PERMOHONAN_KBG",
-        "SP2D_SATKER","SP2D_PERJANJIAN","SP2D_KPPN",
+        "SP2D_SATKER","SP2D_PERJANJIAN","SP2D_KPPN","FORMAT_TEMPLATE",
         "BUKTI_BIAYA","SURAT_KUASA_PEMBLOKIRAN",
       ],
       BROKER: [
@@ -405,7 +406,7 @@ export function route(service: Service, input: Input): Response {
         "NIB","CONTRACT","KYB","PRINCIPAL_REQUEST",
         "AKTA_PENDIRIAN","IDENTITAS_PENGURUS","NPWP","TDR",
         "LAPORAN_KEUANGAN","SIUJK","ASOSIASI_PROFESI","IZIN_LAINNYA",
-        "UNDANGAN_TENDER","PERMOHONAN_BG","PERMOHONAN_KBG",
+        "UNDANGAN_TENDER","PERMOHONAN_BG","PERMOHONAN_KBG","FORMAT_TEMPLATE",
         "SP2D_SATKER","SP2D_PERJANJIAN","SP2D_KPPN",
       ],
       PENJAMIN: [
@@ -445,28 +446,26 @@ export function route(service: Service, input: Input): Response {
       "Base64 tidak valid",
     );
     const raw = Buffer.from(encoded, "base64");
-    let textSafe = false;
+    let format: ReturnType<typeof detectUploadedFormat>;
     try {
-      new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(raw);
-      textSafe = !raw.includes(0);
-    } catch {}
-    req(
-      raw.subarray(0, 5).toString() === "%PDF-" || textSafe,
-      "DOCUMENT",
-      "Hanya teks UTF-8 atau PDF",
-    );
-    if(b.kind==="LKN_PHOTOS")
-      req(raw.subarray(0,5).toString()==="%PDF-","DOCUMENT",
-        "Bukti foto LKN harus disatukan dalam PDF (maksimal 2 MB)");
+      format = detectUploadedFormat(raw);
+    } catch (e) {
+      throw new DomainError("DOCUMENT", e instanceof Error ? e.message : "Format dokumen tidak valid", 422);
+    }
+    if (b.kind === "LKN_PHOTOS")
+      req(["application/pdf","image/jpeg","image/png"].includes(format.mime),
+        "DOCUMENT", "Foto LKN hanya menerima PDF, JPG atau PNG");
     const d = service.addDocument(
       a,
       app,
       b.kind,
       raw,
       b.source_reference ? str(b.source_reference, 0, 500) : "",
+      false,
+      format.mime,
     );
     return json(
-      { id: d.id, kind: d.kind, sha256: d.digest, verified: false },
+      { id: d.id, kind: d.kind, sha256: d.digest, verified: false, media_type: format.mime },
       201,
     );
   }
@@ -495,15 +494,20 @@ export function route(service: Service, input: Input): Response {
     });
     return json({ id: d.id, verified: true });
   }
-  if (matches("documents", "*", "download") && method === "GET")
-    return new Response(service.download(a, p[1]), {
+  if (matches("documents", "*", "download") && method === "GET") {
+    const raw = service.download(a, p[1]);
+    const stored = s.get("documents", p[1]);
+    const ext: Record<string, string> = {"application/pdf":"pdf","image/jpeg":"jpg","image/png":"png","text/plain":"txt"};
+    const extension = ext[String(stored.media_type || "")] || "bin";
+    return new Response(raw, {
       headers: {
         "Content-Type": "application/octet-stream",
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": `attachment; filename="${p[1].replace(/[^a-zA-Z0-9-]/g, "")}.bin"`,
+        "Content-Disposition": `attachment; filename="${p[1].replace(/[^a-zA-Z0-9-]/g, "")}.${extension}"`,
       },
     });
+  }
   if (matches("mandates") && post) {
     fields(
       b,
