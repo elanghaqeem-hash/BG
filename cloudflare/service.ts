@@ -554,24 +554,16 @@ export class Service {
           ? BROKER_VISIBLE_DOCUMENT_KINDS
           : null;
       if (scope) {
-        const items = checklist.items.filter((item) => scope.includes(item.kind));
-        const actionable = items.filter((item) => item.required && item.status !== "UPCOMING");
-        const missing = actionable.filter((item) => item.status === "MISSING").length;
-        const pending = actionable.filter((item) => item.status === "PENDING").length;
+        // Preserve full checklist/status visibility for applicant progress,
+        // but never disclose UUIDs of bank-only evidence that the actor
+        // cannot list or download.
         out.document_checklist = {
           ...checklist,
-          items,
-          counts: {
-            required: actionable.length,
-            verified: actionable.filter((item) => item.status === "VERIFIED").length,
-            missing,
-            pending,
-            upcoming: items.filter((item) => item.status === "UPCOMING").length,
-          },
-          note: "Hanya persyaratan dokumen dalam kewenangan pengguna; pemeriksaan dan keputusan internal bank tidak ditampilkan.",
-          notification: missing + pending
-            ? `Terdapat ${missing} dokumen belum diunggah dan ${pending} dokumen menunggu verifikasi pada kewenangan Anda.`
-            : "Dokumen yang dapat Anda akses telah ditinjau; status keputusan bank mengikuti proses internal.",
+          items: checklist.items.map((item) =>
+            scope.includes(item.kind)
+              ? item
+              : { ...item, document_id: null },
+          ),
         };
       } else {
         out.document_checklist = checklist;
