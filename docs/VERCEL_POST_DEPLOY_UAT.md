@@ -47,3 +47,27 @@ Additional critical journeys: document hash and encrypted download authorization
 6. Roll back portal traffic to prior Vercel/Cloudflare release if any security or business invariant fails.
 
 Vercel Hobby is for personal/noncommercial sandbox use; actual commercial bank guarantee operations require an appropriate plan, regulatory approvals, stronger backend architecture, security assurance and operational controls.
+
+
+## Integration regression: Vercel proxy × Cloudflare-native business routes (30 October 2026)
+
+The `tests/vercel-five-actor-proxy.test.mjs` test exercises the actual `proxyApi` module and native bank `route` together. It creates a **disposable in-memory SQLite bank** with randomly generated fixture passwords and encryption key. No requests reach the deployed Cloudflare Worker or Vercel production backend, no customer records are accessed, and no production state is changed.
+
+Coverage includes:
+- Initial unauthenticated denials for `auth/me`, applications, claims, users and audit events.
+- Logins through the Vercel HTTP proxy, server session cookie propagation and role identity for Principal, Bank (MPO), Penjamin, Obligee, Broker, Compliance, Audit.
+- Role-limited master/catalog and admin users access, broker without mandate, wrong obligee organization, rejected cross-origin POST.
+- Invalid CSRF; Principal upload of synthetic NIB; prohibition of self-verification; independent Compliance verification; application submission; logout/session revocation with other actors unaffected.
+- Negative public verification for a deliberately fictitious BG token.
+
+The existing `tests/native-backend.test.mjs` covers full multi-role bank guarantee issuance, claim, settlement, document encryption, versioning, maker-checker and audit integrity using isolated test fixtures. Those tests remain required; the proxy integration does not replace them.
+
+### Outstanding go/no-go conditions
+
+- **Live authenticated five-actor UAT is NOT verified**: no real Vercel/Cloudflare login credentials were used. Do not mark business UAT PASS from backend unit/proxy integration or anonymous health checks.
+- **Shared Vercel egress identity:** The Cloudflare Durable Object currently keys a per-IP rate limiter from `CF-Connecting-IP`. With the Vercel reverse proxy, this may represent Vercel egress rather than the original browser. Verify load and fair-rate behavior; introduce authenticated, signed client provenance or an approved upstream limiter before broad multi-user rollout. Do not trust arbitrary `X-Forwarded-For`.
+- **QR origin:** Cloudflare QR generation currently uses the request host, which may refer to the Cloudflare legacy address. Test the QR deep link and decide on a documented canonical Vercel verification origin without accepting spoofed public-host headers.
+- **Secure backend URL:** Production proxy never permits HTTP localhost even if `BG_ALLOW_LOCAL_API=1` is set. Only development may use local HTTP.
+- **Operations:** Vercel Hobby and Cloudflare Free are appropriate only for noncommercial experimentation, not financial production resilience, guaranteed uptime or regulatory issuance.
+
+A complete live UAT needs separate synthetic identities, signed-off five-actor results, CSRF/RBAC negative evidence, sample documents, backed-up test fixture, and a reviewer independent of transaction maker.
