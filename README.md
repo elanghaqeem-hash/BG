@@ -18,6 +18,14 @@ Secret identitas awal dan kunci enkripsi harus dipasang secara privat. Panduan:
 [Cloudflare deployment](docs/CLOUDFLARE_DEPLOYMENT.md),
 [verifikasi backend native](docs/NATIVE_BACKEND_VERIFICATION_20261028.md).
 
+## Vercel — portal Next.js (migrasi tahap pertama)
+
+Repository juga menyediakan `frontend/vercel.json` agar frontend dapat dibangun secara native pada Vercel. Untuk import GitHub gunakan **Root Directory `frontend`**, Framework Preset **Next.js**, Node.js **22.x**, dan variabel server-only `BG_API_INTERNAL_URL` menuju endpoint `https://bg.elang-haqeem.workers.dev/api`.
+
+Tahap ini **hanya memindahkan portal dan proxy HTTP**. Backend Cloudflare Durable Object, dokumen terenkripsi, database, alarm, dan rahasia tetap berada di Cloudflare. Periksa `GET /api/health/deployment` dan jalankan pengujian login, CSRF, dokumen serta workflow sebelum mengalihkan domain. Tidak ada persetujuan aktivasi transaksi BG riil.
+
+Baca [Vercel migration runbook](docs/VERCEL_MIGRATION.md) sebelum deployment.
+
 ## Yang dapat dijalankan
 
 - Login/logout identitas berbeda, sesi server-side, CSRF, scope organisasi/kantor, maker-checker dan revokasi kuasa broker.
