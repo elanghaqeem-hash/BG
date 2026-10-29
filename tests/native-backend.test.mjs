@@ -1689,7 +1689,7 @@ test("portal UAT: JPG/PNG upload persists correctly without pretending evidence 
   assert.equal(file.media_type,"image/png");
   assert.equal(file.verified,false);
   const response=f.raw("/documents/"+file.id+"/download");
-  assert.match(response.headers.get("content-disposition"),/\\.png/);
+  assert.match(response.headers.get("content-disposition"),/\.png/);
   const latest=await f.call("/applications/"+j.a.id);
   assert.equal(latest.document_checklist.items.find(x=>x.kind==="NIB").status,"PENDING");
 });
