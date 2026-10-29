@@ -143,7 +143,7 @@ export function recordRecoveryAction(svc:Service,actor:Data,a:Row,c:Row,x:Data){
 }
 export function reviewRecoveryAction(svc:Service,actor:Data,a:Row,c:Row,x:Data){
   svc.role(actor,["LEGAL","COMPLIANCE"]);
-  const row=recovery(svc,c);
+  const row=checkedRecovery(svc,a,c);
   req(row.status==="TRACKING_ONLY","RECOVERY","Kasus belum dapat diperiksa",409);
   const {actions,reviews}=verifyActionEvidence(svc,a,c);
   const original=actions.find(action=>action.id===x.action_id);
@@ -165,7 +165,7 @@ export function reviewRecoveryAction(svc:Service,actor:Data,a:Row,c:Row,x:Data){
 }
 export function requestRecoveryClosure(svc:Service,actor:Data,a:Row,c:Row,x:Data){
   svc.role(actor,["LITIGATION"]);
-  const row=recovery(svc,c);
+  const row=checkedRecovery(svc,a,c);
   req(row.status==="TRACKING_ONLY","RECOVERY","Status kasus belum dapat ditutup",409);
   const {actions,reviews}=verifyActionEvidence(svc,a,c);
   req(actions.length>0 && actions.every(act=>reviews.some(r=>r.action_id===act.id)) &&
