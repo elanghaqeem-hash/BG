@@ -26,6 +26,8 @@ import {reviewServicing, partnerEndorse, approveServicing, rejectServicing,
   withdrawServicing, cancelApprovedServicing} from "./servicing-engine.ts";
 import {recordVisit, reviewVisit, checkedVisit} from "./visit-reports.ts";
 import {recordStandardAnalysis,reviewStandardAnalysis,checkedStandardAnalysis} from "./standard-analysis.ts";
+import {openRecovery,reviewRecovery,recordRecoveryAction,reviewRecoveryAction,
+  requestRecoveryClosure,confirmRecoveryClosure} from "./recovery-engine.ts";
 export const BANK = new Set([
   "AO",
   "ANALYST",
@@ -1307,6 +1309,24 @@ export class Service {
     const p = this.policy(a),
       before = c.state;
     switch (cmd) {
+      case "open_recovery":
+        openRecovery(this,actor,a,c,x);
+        break;
+      case "review_recovery":
+        reviewRecovery(this,actor,a,c,x);
+        break;
+      case "record_recovery_action":
+        recordRecoveryAction(this,actor,a,c,x);
+        break;
+      case "review_recovery_action":
+        reviewRecoveryAction(this,actor,a,c,x);
+        break;
+      case "request_recovery_closure":
+        requestRecoveryClosure(this,actor,a,c,x);
+        break;
+      case "confirm_recovery_closure":
+        confirmRecoveryClosure(this,actor,a,c,x);
+        break;
       case "report":
         this.role(actor, OPS);
         this.state(c, "CLAIM_RECEIVED");
