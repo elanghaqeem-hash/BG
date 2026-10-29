@@ -368,6 +368,8 @@ export function route(service: Service, input: Input): Response {
     const sender=BANK.has(a.role)?"BANK":String(a.role);
     req(["BANK","PRINCIPAL","PENJAMIN","BROKER"].includes(sender),
       "FORBIDDEN","Peran ini tidak dapat memakai komunikasi pengajuan",403);
+    if(post) req(!["AUDIT","MONITOR","ADMIN","CONFIG_CHECKER","WORKER"].includes(a.role),
+      "FORBIDDEN","Peran pengawas atau admin hanya membaca komunikasi",403);
     const all: Data[]=Array.isArray(app.portal_messages)?app.portal_messages:[];
     const visible=()=>all.filter((m:Data)=>sender==="BANK"||m.from===sender||m.to===sender);
     if(!post) return json(visible());
@@ -380,6 +382,11 @@ export function route(service: Service, input: Input): Response {
       BROKER:["BANK","PRINCIPAL"]
     };
     req(allowed[sender].includes(recipient),"RECIPIENT","Tujuan pesan tidak berwenang",403);
+    if(recipient==="BROKER"){
+      const mandate=s.maybe("mandates",app.mandate||"");
+      req(!!mandate && !mandate.revoked_at && timestamp(mandate.expires)>now,
+        "MANDATE","Tidak ada kuasa Broker yang aktif",422);
+    }
     const topic=str(b.topic,1,30);
     req(["KLARIFIKASI","KELENGKAPAN_DOKUMEN","JADWAL_KUNJUNGAN","LAINNYA"].includes(topic),
       "TOPIC","Kategori pesan tidak dikenal",422);
