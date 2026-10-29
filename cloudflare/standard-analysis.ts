@@ -104,8 +104,12 @@ export function recordStandardAnalysis(svc:Service,actor:Data,a:Row,x:Data) {
   const orderedYears=profits.map(p=>p.year).sort((a,b)=>b-a);
   req(orderedYears.every((year,i)=>i===0||orderedYears[i-1]-year===1),
     "STANDARD_ANALYSIS","Riwayat laba harus berupa tahun berurutan",409);
-  req(orderedYears[0]>=Number(jakartaDate(svc.now).slice(0,4))-3,
-    "STANDARD_ANALYSIS","Periode laba terakhir terlalu lama untuk analisis berjalan",409);
+  // Do not invent a universal recency cutoff: the source form does not set one.
+  // Only a versioned, maker-checker-approved policy may impose this guard.
+  const maxAge=svc.policy(a).analysis_controls?.max_profit_age_years;
+  if(maxAge!==null && maxAge!==undefined)
+    req(orderedYears[0]>=Number(jakartaDate(svc.now).slice(0,4))-maxAge,
+      "STANDARD_ANALYSIS","Periode laba melampaui batas kemutakhiran policy",409);
   req(typeof x.additional_collateral==="string","STANDARD_ANALYSIS",
     "Nilai agunan tambahan wajib dinyatakan (nol jika tidak ada)");
   const extraCollateral=amount(money(x.additional_collateral));
