@@ -173,7 +173,8 @@ export function capacity(svc:Service,a:Row) {
     .filter(r=>r.status==="RESERVED" && r.application_id!==a.id);
   const sum=(field:string,value:string)=>
     issued.filter(r=>r[field]===value).reduce((acc,r)=>acc+money(r.amount),0n)+
-    reserved.filter(r=>r[field]===value).reduce((acc,r)=>acc+money(r.amount),0n);
+    reserved.filter(r=>r[field]===value && !issued.some(g=>g.id===r.application_id))
+      .reduce((acc,r)=>acc+money(r.amount),0n);
   return {principal:sum("principal",a.principal),partner:sum("partner",a.partner)};
 }
 export function reserveCapacity(svc:Service,actor:Data,a:Row) {
