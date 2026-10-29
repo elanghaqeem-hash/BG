@@ -8,6 +8,7 @@ import { readFileSync, appendFileSync } from 'node:fs';
 const levels = ['critical', 'high', 'moderate', 'low', 'info'];
 const output = ['# BG dependency security audit', ''];
 let invalid = false;
+let blocking = false;
 for (const filename of process.argv.slice(2)) {
   let audit;
   try {
@@ -19,6 +20,7 @@ for (const filename of process.argv.slice(2)) {
     continue;
   }
   const counts = audit.metadata.vulnerabilities;
+  if ((counts.critical || 0) > 0 || (counts.high || 0) > 0) blocking = true;
   const findings = Object.entries(audit.vulnerabilities).sort((a,b) =>
     levels.indexOf(a[1].severity) - levels.indexOf(b[1].severity));
   output.push('## ' + filename,
@@ -41,4 +43,7 @@ for (const filename of process.argv.slice(2)) {
 const summary = output.join('\n');
 console.log(summary);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
-if (invalid) process.exitCode = 1;
+if (invalid || blocking) {
+  console.error('BG security release gate BLOCKED: unresolved high/critical advisories or invalid audit');
+  process.exitCode = 1;
+}
