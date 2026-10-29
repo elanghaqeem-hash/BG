@@ -31,7 +31,8 @@
     }
   ],
   "vars": {
-    "BG_MODE": "SANDBOX"
+    "BG_MODE": "SANDBOX",
+    "BG_PUBLIC_VERIFY_ORIGIN": "https://bg-collman.vercel.app"
   },
   "secrets": {
     "required": [
