@@ -87,7 +87,14 @@ test("Guarantor and internal administrator cannot bypass document download scope
     f.service.flush();
     assert.throws(() => f.service.download(f.penjamin, slik.id), (error) => error.status === 403);
     const admin = { id: "admin", role: "ADMIN", org: "bank-org", office: "cabang-1", bank: "bank-uat" };
-    assert.throws(() => f.service.download(admin, slik.id), (error) => error.status === 403);
+    const configChecker = { ...admin, id: "config_checker", role: "CONFIG_CHECKER" };
+    for (const identity of [admin, configChecker]) {
+      const view = f.service.view(identity, f.app);
+      assert.equal(view.workflow, undefined);
+      assert.deepEqual(view.documents, []);
+      assert.equal(view.document_checklist, undefined);
+      assert.throws(() => f.service.download(identity, slik.id), (error) => error.status === 403);
+    }
   } finally {
     f.sqlite.close();
   }
