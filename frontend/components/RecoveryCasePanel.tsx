@@ -40,8 +40,13 @@ export function RecoveryCasePanel({claim,app,role,busy,api,work,refresh}:Props){
     (!state || state==='RETURNED'))options.push('open_recovery');
  if(['LEGAL','COMPLIANCE'].includes(role)&&state==='PENDING_LEGAL_REVIEW')
   options.push('review_recovery');
- if(role==='LITIGATION'&&state==='TRACKING_ONLY')
-  options.push('record_recovery_action','request_recovery_closure');
+ if(role==='LITIGATION'&&state==='TRACKING_ONLY'){
+  options.push('record_recovery_action');
+  const actions=(snapshot?.events||[]).filter(e=>e.kind==='ACTION_RECORDED');
+  const reviews=(snapshot?.events||[]).filter(e=>e.kind==='ACTION_REVIEWED');
+  if(actions.length>0&&actions.every(e=>reviews.some(r=>r.action_id===e.id))&&
+    reviews.some(r=>r.accepted===true))options.push('request_recovery_closure');
+ }
  if(['LEGAL','COMPLIANCE'].includes(role)&&state==='TRACKING_ONLY')
   options.push('review_recovery_action');
  if(['LEGAL','COMPLIANCE'].includes(role)&&state==='CLOSURE_PENDING')
