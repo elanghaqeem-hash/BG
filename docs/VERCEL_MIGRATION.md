@@ -27,6 +27,10 @@ Vercel Functions bukan pengganti Durable Objects: kode `cloudflare/bank-backend.
 
 `frontend/vercel.json` mengunci framework dan perintah build, namun **Root Directory tetap harus diatur dalam project Vercel**. Jangan memakai `npm run build` dari root repository, karena script root menjalankan OpenNext untuk Cloudflare.
 
+## Batas paket Vercel Hobby
+
+Pada layar import terlihat plan **Hobby**. Berdasarkan ketentuan Vercel, Hobby hanya diperbolehkan untuk pemakaian **pribadi/non-komersial**. Lingkungan demo/pengembangan pribadi dapat dievaluasi pada Hobby sesuai ketentuannya, tetapi sistem BG yang dipakai secara komersial atau untuk layanan bank memerlukan plan yang sesuai (Pro/Enterprise) dan pengkajian kepatuhan institusi. **Jangan meningkatkan paket atau memulai biaya tanpa persetujuan pemilik akun.**
+
 ## Environment Variables Vercel
 
 Tambahkan pada Project → Settings → Environment Variables untuk **Production** dan **Preview**:
