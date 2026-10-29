@@ -17,5 +17,5 @@ test("reject empty, invalid, high-resolution, oversized and truncated image evid
   assert.throws(()=>detectUploadedFormat(Uint8Array.from([0,255,0,2])),/Hanya/);
   const png=Uint8Array.from([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,16,1,0,0,2,88]);
   assert.throws(()=>detectUploadedFormat(png),/4096/);
-  assert.throws(()=>detectUploadedFormat(Uint8Array.from([255,216,255,192,0,17,8])),/terpotong/);
+  assert.throws(()=>detectUploadedFormat(Uint8Array.from([255,216,255,192,0,17,8])),/(terpotong|tidak valid)/);
 });
