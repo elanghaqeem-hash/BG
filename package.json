@@ -6,14 +6,15 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "build": "npm --prefix frontend ci && npm --prefix frontend run build:cloudflare",
+    "build": "npm run check:release-preflight && npm --prefix frontend ci && npm --prefix frontend run build:cloudflare",
     "deploy": "wrangler deploy",
     "preview": "wrangler dev",
     "check:deploy": "wrangler deploy --dry-run",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "typecheck": "npm --prefix frontend run typecheck",
     "cf-typegen": "wrangler types --config frontend/wrangler.jsonc --env-interface CloudflareEnv --include-runtime=false worker-configuration.d.ts",
-    "typecheck:worker": "tsc -p tsconfig.worker.json"
+    "typecheck:worker": "tsc -p tsconfig.worker.json",
+    "check:release-preflight": "node scripts/check-release-preflight.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261027.1",

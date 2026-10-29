@@ -31,6 +31,14 @@ export const TABLES = [
   "audit_log",
   "outbox",
   "notifications",
+  "underwritings",
+  "collaterals",
+  "limit_reservations",
+  "servicing",
+  "visits",
+  "standard_analyses",
+  "recovery_cases",
+  "recovery_events",
   "anchors",
 ] as const;
 export type Table = (typeof TABLES)[number];
@@ -228,6 +236,27 @@ export function validatePolicy(p: Data) {
     "POLICY",
     "Kalender tidak valid",
   );
+  // These controls are opt-in for legacy sandbox policy snapshots. A bank's
+  // approved policy must explicitly authorize them before any operational use.
+  if (p.analysis_controls !== undefined) {
+    const controls = p.analysis_controls;
+    requireValue(controls && typeof controls === "object" &&
+      !Array.isArray(controls) &&
+      Object.keys(controls).every(k => [
+        "require_standard_analysis", "require_five_c", "require_counter_review",
+        "max_profit_age_years",
+      ].includes(k)), "POLICY", "Konfigurasi kontrol analisa tidak valid");
+    for (const k of ["require_standard_analysis", "require_five_c",
+      "require_counter_review"])
+      requireValue(controls[k] === undefined || typeof controls[k] === "boolean",
+        "POLICY", "Flag kontrol "+k+" harus boolean");
+    requireValue(!controls.require_five_c || controls.require_standard_analysis === true,
+      "POLICY", "5C wajib memerlukan Formulir Standar Analisa wajib");
+    const age = controls.max_profit_age_years;
+    requireValue(age === undefined || age === null ||
+      (Number.isInteger(age) && age >= 1 && age <= 10), "POLICY",
+      "Umur maksimum riwayat laba harus 1–10 tahun atau null");
+  }
   splitUjrah("0", p);
   businessDue(Date.now(), p.rules["BR-14"].business_days, p.calendar);
   businessDue(Date.now(), p.rules["BR-18"].business_days, p.calendar);
@@ -380,7 +409,7 @@ export class Store {
   }
   delete(table: Table, id: string) {
     requireValue(
-      !["audit_log", "journals", "approvals"].includes(table),
+      !["audit_log", "journals", "approvals", "recovery_events"].includes(table),
       "IMMUTABLE",
       "Catatan bersifat append-only",
       409,
@@ -430,7 +459,7 @@ export function initializeSchema(db: Database) {
   db.run(
     "CREATE TABLE IF NOT EXISTS request_limits(key TEXT NOT NULL,minute INTEGER NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(key,minute))",
   );
-  for (const table of ["audit_log", "journals", "approvals"])
+  for (const table of ["audit_log", "journals", "approvals", "recovery_events"])
     for (const operation of ["UPDATE", "DELETE"])
       db.run(
         `CREATE TRIGGER IF NOT EXISTS ${table}_${operation.toLowerCase()}_deny BEFORE ${operation} ON ${table} BEGIN SELECT RAISE(ABORT,'append only'); END`,
@@ -443,6 +472,16 @@ export function initializeSchema(db: Database) {
     ["applications", "principal"],
     ["applications", "partner"],
     ["sessions", "user_id"],
+    ["underwritings", "application_id"],
+    ["collaterals", "application_id"],
+    ["limit_reservations", "application_id"],
+    ["servicing", "application_id"],
+    ["visits", "application_id"],
+    ["standard_analyses", "application_id"],
+    ["recovery_cases", "application_id"],
+    ["recovery_cases", "claim_id"],
+    ["recovery_events", "application_id"],
+    ["recovery_events", "recovery_id"],
   ])
     db.run(
       `CREATE INDEX IF NOT EXISTS ${table}_${field}_index ON ${table}(json_extract(data,'$.${field}'))`,

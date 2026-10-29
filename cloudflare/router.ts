@@ -15,6 +15,11 @@ import {
   type Data,
 } from "./core.ts";
 import { Service, BANK, OPS, randomToken } from "./service.ts";
+import { enterpriseSnapshot, policySimulation } from "./enterprise-controls.ts";
+import { recoverySnapshot } from "./recovery-engine.ts";
+import {servicingListing} from "./servicing-engine.ts";
+import {visitSnapshot} from "./visit-reports.ts";
+import {standardAnalysisSnapshot} from "./standard-analysis.ts";
 import { IDENTITIES } from "./bootstrap.ts";
 import QRCode from "qrcode";
 export type Input = {
@@ -333,6 +338,18 @@ export function route(service: Service, input: Input): Response {
       201,
     );
   }
+  if (matches("applications", "*", "standard-analysis") && method === "GET") {
+    return json(standardAnalysisSnapshot(service,a,s.get("applications",p[1])));
+  }
+  if (matches("applications", "*", "visit") && method === "GET") {
+    return json(visitSnapshot(service,a,s.get("applications",p[1])));
+  }
+  if (matches("applications", "*", "servicing") && method === "GET") {
+    return json(servicingListing(service,a,s.get("applications",p[1])));
+  }
+  if (matches("applications", "*", "enterprise") && method === "GET") {
+    return json(enterpriseSnapshot(service,a,s.get("applications",p[1])));
+  }
   if (matches("applications", "*") && method === "GET")
     return json(service.view(a, s.get("applications", p[1])));
   if (matches("applications", "*", "commands", "*") && post) {
@@ -375,6 +392,7 @@ export function route(service: Service, input: Input): Response {
     service.access(a, app, a.role === "BROKER");
     const allowed: Data = {
       PRINCIPAL: [
+        "AMENDMENT_REQUEST",
         "NIB","CONTRACT","KYB","PRINCIPAL_REQUEST","MANDATE",
         "AKTA_PENDIRIAN","IDENTITAS_PENGURUS","NPWP","TDR",
         "LAPORAN_KEUANGAN","SIUJK","ASOSIASI_PROFESI","IZIN_LAINNYA",
@@ -383,6 +401,7 @@ export function route(service: Service, input: Input): Response {
         "BUKTI_BIAYA","SURAT_KUASA_PEMBLOKIRAN",
       ],
       BROKER: [
+        "AMENDMENT_REQUEST",
         "NIB","CONTRACT","KYB","PRINCIPAL_REQUEST",
         "AKTA_PENDIRIAN","IDENTITAS_PENGURUS","NPWP","TDR",
         "LAPORAN_KEUANGAN","SIUJK","ASOSIASI_PROFESI","IZIN_LAINNYA",
@@ -391,6 +410,7 @@ export function route(service: Service, input: Input): Response {
       ],
       PENJAMIN: [
         "SP2KBG",
+        "COUNTER_ENDORSEMENT",
         "FORMAT_APPROVAL",
         "CERTIFICATE",
         "CONTRA_DECISION",
@@ -435,6 +455,9 @@ export function route(service: Service, input: Input): Response {
       "DOCUMENT",
       "Hanya teks UTF-8 atau PDF",
     );
+    if(b.kind==="LKN_PHOTOS")
+      req(raw.subarray(0,5).toString()==="%PDF-","DOCUMENT",
+        "Bukti foto LKN harus disatukan dalam PDF (maksimal 2 MB)");
     const d = service.addDocument(
       a,
       app,
@@ -592,6 +615,11 @@ export function route(service: Service, input: Input): Response {
       }),
     );
   }
+  if (matches("claims", "*", "recovery") && method === "GET") {
+    const claim = s.get("claims", p[1]);
+    return json(recoverySnapshot(service,a,
+      s.get("applications",claim.application_id),claim));
+  }
   if (matches("claims", "*", "commands", "*") && post) {
     fields(
       b,
@@ -687,6 +715,10 @@ export function route(service: Service, input: Input): Response {
       external_anchor_verified: false,
     });
   }
+  if (matches("policies","*","simulate") && post) {
+    fields(b,["facts","codes"],["facts"]);
+    return json(policySimulation(service,a,p[1],b.facts,b.codes));
+  }
   if (matches("policies") && post) {
     service.role(a, ["ADMIN"]);
     fields(b, ["configuration"], ["configuration"]);
@@ -747,6 +779,29 @@ function validateCommand(command: string, x: Data) {
     withdraw: ["document"],
     refer_dispute: ["document"],
     request_close: ["document"],
+    record_standard_analysis: ["checklist_complete","owner","owner_other","project_type","project_type_other","project_value","funding_source","funding_other","project_document","contract_reference","contract_date","completion_months","guarantee_amount","guarantee_type","guarantee_other","customer_relationship","business_years","management","slik_document","slik_comment","projects_completed","projects_last_year","last_year_project_value","business_condition","profit_history","financial_document","bank_support","bank_support_details","additional_collateral","collateral_type_other","recommendation","reason"],
+    review_standard_analysis: ["accepted","reason"],
+    record_visit: ["visited_at","customer_type","request_type","location","environment","facilities_within_1km","notes","photo_categories","photo_document","attested"],
+    review_visit: ["accepted","reason","report_document"],
+    record_5c: ["five_c","financial_document","financials","recommendation","narrative"],
+    review_5c: ["accepted","reason"],
+    review_counter: ["scheme","pks_reference","pks_document"],
+    register_collateral: ["type","value","document","binding_reference"],
+    approve_collateral: ["collateral_id","accepted","reason"],
+    request_servicing: ["kind","document","reason"],
+    review_servicing: ["servicing_id","collectibility","pulled_at","screening_clear","ubo_verified","recommendation","narrative"],
+    partner_endorse: ["servicing_id","document","reference","cover_amount","cover_until"],
+    approve_servicing: ["servicing_id"],
+    reject_servicing: ["servicing_id","reason"],
+    withdraw_servicing: ["servicing_id","reason"],
+    cancel_approved_servicing: ["servicing_id","document","reason"],
+    request_bg_closure: ["document"],
+    open_recovery: ["kind","document","reason"],
+    review_recovery: ["accepted","reason"],
+    record_recovery_action: ["action_type","document","reason"],
+    review_recovery_action: ["action_id","accepted","reason"],
+    request_recovery_closure: ["document","reason"],
+    confirm_recovery_closure: ["accepted","reason"],
   };
   for (const field of required[command] || [])
     req(
@@ -759,6 +814,13 @@ function validateCommand(command: string, x: Data) {
     "reference",
     "issuing_unit",
     "draft_hash",
+    "financial_document",
+    "pks_reference",
+    "pks_document",
+    "collateral_id",
+    "servicing_id",
+    "action_id",
+    "binding_reference",
     "to",
     "decision",
   ])

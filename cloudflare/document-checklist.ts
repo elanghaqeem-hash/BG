@@ -79,7 +79,9 @@ export function buildDocumentChecklist(a: Application, docs: Evidence[], role: s
   const visible=LIBRARY.filter(r=>(!r.condition||r.condition(a)) && (!allowed||allowed.has(r.kind)));
   const items=visible.map(r=>{
     // Dokumen terbaru harus diverifikasi, walaupun versi sebelumnya sudah lolos.
-    const latest=docs.filter(d=>d.kind===r.kind).at(-1);
+    const latest=docs.filter(d=>d.kind===r.kind)
+      .sort((x,y)=>Number(x.revision||0)-Number(y.revision||0) ||
+        String(x.created_at||"").localeCompare(String(y.created_at||""))).at(-1);
     const required=!!r.mandatory;
     const status=latest
       ? (latest.verified?"VERIFIED":"PENDING")

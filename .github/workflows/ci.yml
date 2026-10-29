@@ -32,6 +32,7 @@ jobs:
         with: {node-version: "24", cache: npm, cache-dependency-path: "**/package-lock.json"}
       - run: npm ci
       - run: npm test
+      - run: npm run check:release-preflight
       - run: npm run check:deploy
       - run: npm --prefix frontend run typecheck
       - run: npm run typecheck:worker

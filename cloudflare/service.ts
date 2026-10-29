@@ -20,6 +20,14 @@ import {
   type Row,
 } from "./core.ts";
 import { buildDocumentChecklist } from "./document-checklist.ts";
+import { recordFiveC, reviewFiveC, counterReview, registerCollateral, approveCollateral,
+  reserveCapacity, capacity, requestServicing, requestClosure, confirmClosure } from "./enterprise-controls.ts";
+import {reviewServicing, partnerEndorse, approveServicing, rejectServicing,
+  withdrawServicing, cancelApprovedServicing} from "./servicing-engine.ts";
+import {recordVisit, reviewVisit, checkedVisit} from "./visit-reports.ts";
+import {recordStandardAnalysis,reviewStandardAnalysis,checkedStandardAnalysis} from "./standard-analysis.ts";
+import {openRecovery,reviewRecovery,recordRecoveryAction,reviewRecoveryAction,
+  requestRecoveryClosure,confirmRecoveryClosure} from "./recovery-engine.ts";
 export const BANK = new Set([
   "AO",
   "ANALYST",
@@ -151,22 +159,19 @@ export class Service {
       "DOCUMENT",
       "Dokumen tidak cocok dengan transaksi/jenis",
     );
-    req(
-      !verified || d.verified,
-      "DOCUMENT",
-      "Dokumen belum diverifikasi ke sumber primer",
-    );
+    req(!verified || d.verified,
+      "DOCUMENT", "Dokumen belum diverifikasi ke sumber primer");
+    if(verified && kind)
+      req(this.latest(a,kind).id===d.id,"DOCUMENT",
+        "Versi dokumen yang dirujuk bukan versi terbaru",409);
     return d;
   }
   latest(a: Row, kind: string) {
-    const docs = this.docs(a)
-      .filter((x) => x.kind === kind && x.verified)
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
-    req(
-      docs.length,
-      "DOCUMENT",
-      "Dokumen " + kind + " terverifikasi diperlukan",
-    );
+    const docs = this.docs(a).filter(x => x.kind === kind)
+      .sort((x,y) => (y.revision||0)-(x.revision||0) ||
+        y.created_at.localeCompare(x.created_at));
+    req(docs[0]?.verified, "DOCUMENT",
+      "Versi dokumen terbaru " + kind + " harus diverifikasi");
     return docs[0];
   }
   addDocument(
@@ -188,6 +193,7 @@ export class Service {
       id,
       application_id: a.id,
       kind,
+      revision: this.docs(a).filter(d=>d.kind===kind).length+1,
       digest: hash(raw),
       iv: encrypted.iv,
       tag: encrypted.tag,
@@ -248,12 +254,15 @@ export class Service {
     );
   }
   facts(a: Row) {
-    const p = this.policy(a),
-      kinds = new Set(
-        this.docs(a)
-          .filter((d) => d.verified)
-          .map((d) => d.kind),
-      );
+    const p = this.policy(a);
+    const latestDocs = new Map<string,Row>();
+    for(const d of this.docs(a)) {
+      const current=latestDocs.get(d.kind);
+      if(!current || (d.revision||0)>(current.revision||0) ||
+        ((d.revision||0)===(current.revision||0) && d.created_at>current.created_at))
+        latestDocs.set(d.kind,d);
+    }
+    const kinds = new Set([...latestDocs.values()].filter(d=>d.verified).map(d=>d.kind));
     const covered = new Set(
       p.rules["BR-06"].sp2_coverage_allowed
         ? (a.sp2?.covered_documents || []).filter(
@@ -564,6 +573,7 @@ export class Service {
       out.documents = out.documents.filter((d: Data) =>
         [
           "SP2KBG",
+          "COUNTER_ENDORSEMENT",
           "CONTRACT",
           "DRAFT_BG",
           "FORMAT_APPROVAL",
@@ -618,11 +628,111 @@ export class Service {
     });
     return result;
   }
+  /** Consistent fail-closed evidence gate at underwriting and at issuance.
+   *  Older sandbox applications remain compatible unless their pinned policy
+   *  explicitly enables mandatory controls. A REVIEWED evidence revision is
+   *  always revalidated even when it was not mandatory to create one.
+   */
+  underwritingReadiness(a: Row) {
+    const controls = this.policy(a).analysis_controls || {};
+    if (controls.require_standard_analysis)
+      req(!!a.standard_analysis_id, "STANDARD_ANALYSIS",
+        "Policy mewajibkan Formulir Standar Analisa yang telah disetujui", 409);
+    const standard = checkedStandardAnalysis(this, a);
+    checkedVisit(this, a); // LKN conditional; if submitted, must be approved.
+    if (controls.require_five_c)
+      req(!!a.underwriting_id, "UNDERWRITING",
+        "Policy mewajibkan review 5C sebelum underwriting", 409);
+    if (a.underwriting_id) {
+      const review = this.s.get("underwritings", a.underwriting_id);
+      req(review.application_id === a.id, "UNDERWRITING",
+        "Analisa 5C tidak terkait permohonan", 409);
+      const financial = this.doc(a, review.evidence_document, "LAPORAN_KEUANGAN");
+      req(financial.digest === review.evidence_hash, "DOCUMENT",
+        "Bukti keuangan 5C sudah berubah; analisis ulang diperlukan", 409);
+      req(review.state === "REVIEWED" &&
+        review.application_fingerprint === this.fingerprint(a) &&
+        (review.visit_id || null) === (a.visit_id || null) &&
+        (review.standard_analysis_id || null) === (standard?.id || null) &&
+        (review.standard_analysis_digest || null) === (standard?.review_digest || null) &&
+        review.recommendation === "LAYAK", "UNDERWRITING",
+        "Review 5C harus konsisten dan merekomendasikan Layak", 409);
+    }
+    if (controls.require_counter_review)
+      req(!!a.counter_review, "COUNTER",
+        "Policy mewajibkan verifikasi PKS dan review KBG", 409);
+    if (a.counter_review) {
+      const review = a.counter_review;
+      const document = this.doc(a, review.pks_document, "PKS");
+      req(document.digest === review.document_hash &&
+        review.application_fingerprint === this.fingerprint(a) &&
+        review.status === "VERIFIED_SANDBOX" &&
+        review.pks_reference === this.s.get("partners", a.partner).pks,
+        "COUNTER", "Verifikasi PKS/KBG sudah berubah dan harus ditelaah ulang", 409);
+    }
+  }
   command(actor: Data, a: Row, cmd: string, x: Data) {
     const p = this.policy(a),
       role = actor.role,
       inter = a.processing_office !== a.issuing_office;
     switch (cmd) {
+      case "record_visit":
+        recordVisit(this,actor,a,x);
+        break;
+      case "review_visit":
+        reviewVisit(this,actor,a,x);
+        break;
+      case "record_standard_analysis":
+        recordStandardAnalysis(this,actor,a,x);
+        break;
+      case "review_standard_analysis":
+        reviewStandardAnalysis(this,actor,a,x);
+        break;
+      case "record_5c":
+        recordFiveC(this,actor,a,x);
+        break;
+      case "review_5c":
+        reviewFiveC(this,actor,a,x);
+        break;
+      case "review_counter":
+        counterReview(this,actor,a,x);
+        break;
+      case "register_collateral":
+        registerCollateral(this,actor,a,x);
+        break;
+      case "approve_collateral":
+        approveCollateral(this,actor,a,x);
+        break;
+      case "reserve_limit":
+        reserveCapacity(this,actor,a);
+        break;
+      case "request_servicing":
+        requestServicing(this,actor,a,x);
+        break;
+      case "review_servicing":
+        reviewServicing(this,actor,a,x);
+        break;
+      case "partner_endorse":
+        partnerEndorse(this,actor,a,x);
+        break;
+      case "approve_servicing":
+        approveServicing(this,actor,a,x);
+        break;
+      case "reject_servicing":
+        rejectServicing(this,actor,a,x);
+        break;
+      case "withdraw_servicing":
+        withdrawServicing(this,actor,a,x);
+        break;
+      case "cancel_approved_servicing":
+        cancelApprovedServicing(this,actor,a,x);
+        break;
+      case "request_bg_closure":
+        requestClosure(this,actor,a,x);
+        break;
+      case "confirm_bg_closure":
+        confirmClosure(this,actor,a);
+        break;
       case "submit":
         this.role(actor, ["PRINCIPAL", "AO", "BROKER"]);
         this.state(a, "DRAFT");
@@ -724,6 +834,7 @@ export class Service {
       case "bank_underwrite":
         this.role(actor, ["ANALYST"]);
         this.state(a, "SP2KBG_ISSUED");
+        this.underwritingReadiness(a);
         this.guard(a, ["BR-02", "BR-03", "BR-05", "BR-06"]);
         a.committee_role = committee(a.category, a.amount, p);
         a.state = a.custom_format ? "CUSTOM_FORMAT_REVIEW" : "APPROVAL";
@@ -930,27 +1041,33 @@ export class Service {
           "Policy tidak lagi efektif",
         );
         req(a.expires_on >= jakartaDate(this.now), "TENOR", "BG kedaluwarsa");
+        this.underwritingReadiness(a);
         this.guard(
           a,
           [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 16].map(
             (n) => "BR-" + String(n).padStart(2, "0"),
           ),
         );
-        const others = this.s
-          .rows("applications")
-          .filter((r) => ACTIVE.includes(r.state));
-        const total = (field: string, value: string) =>
-          others
-            .filter((r) => r[field] === value)
-            .reduce((sum, r) => sum + money(r.amount), 0n);
+        // A guarantee keeps consuming capacity through all issued states and open claims.
+        // Reservations from *other* applications also consume capacity.
+        const exposure = capacity(this,a);
         req(
-          total("partner", a.partner) + money(a.amount) <=
-            money(p.pks.partner_limit) &&
-            total("principal", a.principal) + money(a.amount) <=
-              money(p.pks.principal_limit),
-          "LIMIT",
-          "Kapasitas penjamin atau Principal tidak cukup",
+          exposure.partner + money(a.amount) <= money(p.pks.partner_limit) &&
+            exposure.principal + money(a.amount) <= money(p.pks.principal_limit),
+          "LIMIT","Kapasitas penjamin atau Principal tidak cukup",
         );
+        const collateral = this.s.rows("collaterals",{application_id:a.id});
+        req(collateral.every(c=>c.state==="VERIFIED" &&
+          c.application_fingerprint===this.fingerprint(a)),
+          "COLLATERAL","Agunan harus diverifikasi dan sesuai revisi transaksi",409);
+        const reservation = this.s.maybe("limit_reservations",a.id);
+        if (reservation) {
+          req(reservation.status==="RESERVED" &&
+            reservation.application_fingerprint===this.fingerprint(a),
+            "LIMIT","Reservasi tidak lagi valid",409);
+          reservation.status="CONSUMED";
+          reservation.consumed_at=this.iso;
+        }
         const number =
             "BG-" +
             new Date(this.now).getUTCFullYear() +
@@ -1079,12 +1196,14 @@ export class Service {
       };
     const a = this.s.get("applications", g.id),
       today = jakartaDate(this.now),
-      valid = a.issue_on <= today && today <= a.expires_on;
+      valid = g.status!=="CLOSED" && a.state!=="CLOSED" &&
+        a.issue_on <= today && today <= a.expires_on;
     return {
       authentic: true,
       valid,
       status: valid
         ? "AUTHENTIC_ACTIVE"
+        : g.status==="CLOSED" || a.state==="CLOSED" ? "AUTHENTIC_CLOSED"
         : today > a.expires_on
           ? "AUTHENTIC_EXPIRED"
           : "NOT_YET_EFFECTIVE",
@@ -1097,7 +1216,7 @@ export class Service {
       principal: this.s.get("parties", a.principal).name,
       obligee: this.s.get("parties", a.obligee).name,
       expires_on: a.expires_on,
-      claim_window_open: this.now <= timestamp(g.claim_deadline),
+      claim_window_open: g.status!=="CLOSED" && this.now <= timestamp(g.claim_deadline),
       mode: "SANDBOX",
     };
   }
@@ -1190,6 +1309,24 @@ export class Service {
     const p = this.policy(a),
       before = c.state;
     switch (cmd) {
+      case "open_recovery":
+        openRecovery(this,actor,a,c,x);
+        break;
+      case "review_recovery":
+        reviewRecovery(this,actor,a,c,x);
+        break;
+      case "record_recovery_action":
+        recordRecoveryAction(this,actor,a,c,x);
+        break;
+      case "review_recovery_action":
+        reviewRecoveryAction(this,actor,a,c,x);
+        break;
+      case "request_recovery_closure":
+        requestRecoveryClosure(this,actor,a,c,x);
+        break;
+      case "confirm_recovery_closure":
+        confirmRecoveryClosure(this,actor,a,c,x);
+        break;
       case "report":
         this.role(actor, OPS);
         this.state(c, "CLAIM_RECEIVED");

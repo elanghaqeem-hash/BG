@@ -163,6 +163,7 @@ class Journey {
       {
         kind,
         content_base64: Buffer.from(
+          (kind==="LKN_PHOTOS"?"%PDF-1.7\n":"") +
           "Bukti sandbox " + kind + " " + randomBytes(4).toString("hex"),
         ).toString("base64"),
         source_reference: "Sumber primer UAT",
@@ -796,4 +797,859 @@ test("native checklist reflects pending SLIK without claiming source verificatio
   c=(await f.call("/applications/"+j.a.id)).document_checklist;
   assert.equal(c.items.find(d=>d.kind==="SLIK").status,"VERIFIED");
   assert.ok(c.counts.missing>0); // dokumen lain tetap harus dilengkapi
+});
+
+
+test("enterprise policy dry-run is audited and does not activate policy", async () => {
+  const f=fixture();
+  await f.login("analyst");
+  const result=await f.call("/policies/policy-1/simulate",{
+    facts:{slik_current:false,eligible:true},codes:["BR-03","BR-05"]});
+  assert.equal(result.simulation_only,true);
+  assert.equal(result.passed,false);
+  assert.equal(result.results[0].passed,true);
+  assert.equal(result.results[1].passed,false);
+  await f.login("audit");
+  assert.equal((await f.call("/audit/verify")).valid,true);
+  assert.equal(new Store(f.db).get("policies","policy-1").status,"ACTIVE");
+  f.sqlite.close();
+});
+
+test("enterprise 5C requires verified evidence, separate reviewer and review before underwriting",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.create();
+  for(const kind of ["NIB","CONTRACT","KYB"]) await j.doc(kind);
+  const financial=await j.doc("LAPORAN_KEUANGAN","analyst");
+  await j.cmd("submit","principal");
+  await j.cmd("kyb_pass","compliance",{screening_clear:true,ubo_verified:true});
+  const slik=await j.doc("SLIK","analyst");
+  await j.cmd("record_slik","analyst",{document:slik,collectibility:1,pulled_at:new Date(f.now).toISOString()});
+  await j.cmd("partner_start","penjamin");
+  const sp2=await j.doc("SP2KBG","penjamin");
+  await j.cmd("sp2_issue","penjamin",{document:sp2,reference:"SP2-2026",issuing_unit:"CABANG-UJI",amount:j.a.amount,valid_to:"2027-01-01"});
+  const five_c=Object.fromEntries(["character","capacity","capital","collateral","condition"].map(k=>
+    [k,{risk:"LOW",finding:"Temuan didukung bukti pemeriksaan",mitigation:"Monitoring berkala oleh analis"}]));
+  await j.cmd("record_5c","analyst",{
+    five_c,financial_document:financial,
+    financials:{current_assets:"200",current_liabilities:"100",total_debt:"50",equity:"200"},
+    recommendation:"LAYAK",narrative:"Penilaian analis dan sumber evidence diverifikasi"});
+  assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"UNDERWRITING");
+  assert.equal((await j.cmd("review_5c","analyst",{accepted:true,reason:"Pemeriksaan data telah dilakukan"},403)).code,"FORBIDDEN");
+  await j.cmd("review_5c","mpo",{accepted:true,reason:"Bukti dan analisis dinyatakan memadai"});
+  const details=await f.call("/applications/"+j.a.id+"/enterprise");
+  assert.equal(details.underwriting.state,"REVIEWED");
+  assert.equal(details.underwriting.ratios.current_ratio,"2.00");
+  await j.cmd("bank_underwrite","analyst");
+  assert.equal(j.a.state,"APPROVAL");
+  f.sqlite.close();
+});
+
+test("enterprise collateral and capacity reserve persist, and concurrent exposure is counted",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.issued({},true);
+  const evidence=await j.doc("COLLATERAL","analyst");
+  await j.cmd("register_collateral","analyst",{type:"CASH",value:"2000000000",
+    document:evidence,binding_reference:"BLOCK-SANDBOX-2026-001"});
+  await f.login("mpo");
+  let info=await f.call("/applications/"+j.a.id+"/enterprise");
+  assert.equal(info.collateral[0].state,"PENDING_VERIFICATION");
+  await j.cmd("approve_collateral","compliance",{collateral_id:info.collateral[0].id,
+    accepted:true,reason:"Bukti pemblokiran diverifikasi manual"});
+  await j.cmd("reserve_limit","mpo");
+  info=await f.call("/applications/"+j.a.id+"/enterprise");
+  assert.equal(info.limit_reservation.status,"RESERVED");
+  const j2=new Journey(f);
+  await j2.issued({amount:"9000000000"},true);
+  assert.equal((await j2.cmd("reserve_limit","mpo",{},422)).code,"LIMIT");
+  assert.equal((await j2.cmd("issue","mpo",{},422)).code,"LIMIT");
+  await j.cmd("issue","mpo");
+  info=await f.call("/applications/"+j.a.id+"/enterprise");
+  assert.equal(info.limit_reservation.status,"CONSUMED");
+  f.sqlite.close();
+});
+
+test("BG servicing retains original certificate; closure blocked until claim period and independent review",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const previous=j.a.bg_number;
+  const amendmentDoc=await j.doc("AMENDMENT_REQUEST","principal");
+  await j.cmd("request_servicing","principal",{kind:"EXTENSION",document:amendmentDoc,
+    reason:"Penambahan masa pelaksanaan proyek",
+    proposed_expiry:"2027-09-30"});
+  await f.login("mpo");
+  const detail=await f.call("/applications/"+j.a.id+"/enterprise");
+  assert.equal(detail.servicing[0].status,"PENDING_REVIEW");
+  assert.equal(j.a.state,"ACTIVE");
+  assert.equal(j.a.bg_number,previous);
+  const release=await j.doc("RELEASE","mpo");
+  assert.equal((await j.cmd("request_bg_closure","mpo",{document:release},409)).code,"CLOSURE");
+  f.sqlite.close();
+  const g=fixture(),x=new Journey(g);
+  await x.active();
+  const doc=await x.doc("RELEASE","mpo");
+  g.now=Date.parse("2027-07-01T07:00:00Z");
+  await x.cmd("request_bg_closure","mpo",{document:doc});
+  assert.equal((await x.cmd("confirm_bg_closure","mpo",{},403)).code,"FORBIDDEN");
+  await x.cmd("confirm_bg_closure","compliance");
+  assert.equal(x.a.state,"CLOSED");
+  assert.equal(new Store(g.db).get("guarantees",x.a.id).status,"CLOSED");
+  assert.equal((await g.call("/public/verify/no-token")).authentic,false);
+  g.sqlite.close();
+});
+
+
+test("replacement evidence invalidates earlier verified version during document gate",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.create();
+  await j.doc("NIB");
+  const second=await j.doc("NIB","principal",false);
+  assert.ok(second);
+  const detail=await f.call("/applications/"+j.a.id);
+  assert.equal(detail.document_checklist.items.find(x=>x.kind==="NIB").status,"PENDING");
+  assert.equal((await j.cmd("submit","principal",{},422)).code,"BR-09");
+  f.sqlite.close();
+});
+
+test("collateral cannot be registered using a non-collateral document",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.issued({},true);
+  const unrelated=await j.doc("NIB","analyst");
+  assert.equal((await j.cmd("register_collateral","analyst",{
+    type:"CASH",value:"100",document:unrelated,
+    binding_reference:"BANK-BLOCK-2026"},422)).code,"DOCUMENT");
+  assert.equal(new Store(f.db).rows("collaterals").length,0);
+  f.sqlite.close();
+});
+
+
+async function reviewedServicing(j,proposed_amount="3500000000"){
+  const f=j.f;
+  const requestDocument=await j.doc("AMENDMENT_REQUEST","principal");
+  await j.cmd("request_servicing","principal",{
+    kind:"AMENDMENT",document:requestDocument,
+    proposed_amount,reason:"Perubahan nilai kontrak kerja resmi"});
+  await f.login("mpo");
+  const before=await f.call("/applications/"+j.a.id+"/servicing");
+  assert.equal(before.at(-1).status,"PENDING_REVIEW");
+  const id=before.at(-1).id;
+  for(const kind of ["SLIK","DHN","LEGAL_CHECK","MAP_BG"])
+    await j.doc(kind,"analyst");
+  await j.cmd("review_servicing","analyst",{
+    servicing_id:id,collectibility:1,pulled_at:new Date(f.now).toISOString(),
+    screening_clear:true,ubo_verified:true,recommendation:"LAYAK",
+    narrative:"SLIK, DHN, aspek hukum dan MAP-BG diperiksa ulang"});
+  const cert=await j.doc("COUNTER_ENDORSEMENT","penjamin");
+  await j.cmd("partner_endorse","penjamin",{
+    servicing_id:id,document:cert,reference:"END-2026-0001",
+    cover_amount:proposed_amount,cover_until:"2027-04-27"});
+  return id;
+}
+test("BG amendment requires risk, guarantor and independent bank approval without changing original",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const originalNumber=j.a.bg_number, originalAmount=j.a.amount, originalDate=j.a.expires_on;
+  const id=await reviewedServicing(j);
+  await f.login("mpo");
+  let items=await f.call("/applications/"+j.a.id+"/servicing");
+  assert.equal(items[0].status,"PARTNER_ENDORSED");
+  assert.equal((await j.cmd("partner_endorse","principal",{servicing_id:id,document:"not-owned",reference:"END-2026-0002",cover_amount:"3500000000",cover_until:"2027-04-27"},403)).code,"FORBIDDEN");
+  await j.cmd("approve_servicing","mpo",{servicing_id:id});
+  items=await f.call("/applications/"+j.a.id+"/servicing");
+  assert.equal(items[0].status,"APPROVED_PENDING_ISSUANCE");
+  assert.deepEqual(items[0].approved_roles,["MPO"]);
+  assert.equal(items[0].effective,false);
+  assert.equal(j.a.amount,originalAmount);
+  assert.equal(j.a.expires_on,originalDate);
+  assert.equal(j.a.bg_number,originalNumber);
+  const db=new Store(f.db);
+  assert.equal(db.get("limit_reservations","servicing:"+id).amount,"1500000000.00");
+  assert.equal(db.get("limit_reservations","servicing:"+id).status,"RESERVED");
+  const token=await f.call("/applications/"+j.a.id+"/verification-link");
+  const verified=await f.call("/public/verify/"+token.token);
+  assert.equal(verified.amount,originalAmount);
+  assert.equal(verified.expires_on,originalDate);
+  assert.equal((await j.cmd("request_servicing","principal",{
+    kind:"AMENDMENT",document:await j.doc("AMENDMENT_REQUEST","principal"),
+    proposed_amount:"3600000000",reason:"Perubahan tambahan nominal kerja"},409)).code,"SERVICING");
+  f.sqlite.close();
+});
+test("approved but not effected amendment can be cancelled by Legal and releases delta atomically",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const id=await reviewedServicing(j);
+  await j.cmd("approve_servicing","mpo",{servicing_id:id});
+  const cancellation=await j.doc("CANCELLATION","legal");
+  assert.equal((await j.cmd("cancel_approved_servicing","mpo",{
+    servicing_id:id,document:cancellation,reason:"Batal karena perubahan kontrak"},403)).code,"FORBIDDEN");
+  await j.cmd("cancel_approved_servicing","legal",{
+    servicing_id:id,document:cancellation,reason:"Persetujuan perubahan dibatalkan oleh bank"});
+  const s=new Store(f.db);
+  assert.equal(s.get("servicing",id).status,"CANCELLED");
+  assert.equal(s.get("limit_reservations","servicing:"+id).status,"RELEASED");
+  assert.equal(j.a.state,"ACTIVE");
+  f.sqlite.close();
+});
+test("amendment cannot exceed current principal limit even with valid approvals",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const id=await reviewedServicing(j,"11000000000");
+  assert.equal((await j.cmd("approve_servicing","mpo",{servicing_id:id},409)).code,"LIMIT");
+  const s=new Store(f.db);
+  assert.equal(s.get("servicing",id).status,"PARTNER_ENDORSED");
+  assert.equal(s.maybe("limit_reservations","servicing:"+id),undefined);
+  assert.equal(s.rows("approvals").filter(d=>d.servicing_id===id).length,0);
+  f.sqlite.close();
+});
+test("servicing rejects stale pre-request SLIK and missing new control documents",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  for(const kind of ["SLIK","DHN","LEGAL_CHECK","MAP_BG"])await j.doc(kind,"analyst");
+  const requestDocument=await j.doc("AMENDMENT_REQUEST","principal");
+  await j.cmd("request_servicing","principal",{
+    kind:"EXTENSION",document:requestDocument,
+    proposed_expiry:"2027-09-30",reason:"Tambahan masa penyelesaian proyek"});
+  const ids=await f.call("/applications/"+j.a.id+"/servicing");
+  f.now+=60_000;
+  assert.equal((await j.cmd("review_servicing","analyst",{
+    servicing_id:ids[0].id,collectibility:1,pulled_at:new Date(f.now).toISOString(),
+    screening_clear:true,ubo_verified:true,recommendation:"LAYAK",
+    narrative:"Informasi risiko terverifikasi"},409)).code,"DOCUMENT");
+  assert.equal(new Store(f.db).get("servicing",ids[0].id).status,"PENDING_REVIEW");
+  f.sqlite.close();
+});
+test("public QR reports closed BG as authentic but not active",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const link=await f.call("/applications/"+j.a.id+"/verification-link");
+  const doc=await j.doc("RELEASE","mpo");
+  f.now=Date.parse("2027-07-01T07:00:00Z");
+  await j.cmd("request_bg_closure","mpo",{document:doc});
+  await j.cmd("confirm_bg_closure","compliance");
+  const check=await f.call("/public/verify/"+link.token);
+  assert.equal(check.authentic,true);
+  assert.equal(check.valid,false);
+  assert.equal(check.status,"AUTHENTIC_CLOSED");
+  assert.equal(check.claim_window_open,false);
+  f.sqlite.close();
+});
+
+
+test("servicing raises approval authority when revised private BG exceeds committee threshold",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.issued({obligee:"obligee-private"});
+  await j.cmd("certificate","penjamin",{document:await j.doc("CERTIFICATE","penjamin"),reference:"PRIVATE-CERT-2026"});
+  await j.cmd("deliver","mpo",{document:await j.doc("DELIVERY","obligee_private")});
+  const id=await reviewedServicing(j,"4000000000");
+  assert.equal((await j.cmd("approve_servicing","gh",{servicing_id:id},403)).code,"FORBIDDEN");
+  await j.cmd("approve_servicing","mpo",{servicing_id:id});
+  await f.login("mpo");
+  let rows=await f.call("/applications/"+j.a.id+"/servicing");
+  assert.equal(rows[0].status,"PARTNER_ENDORSED");
+  assert.deepEqual(rows[0].approved_roles,["MPO"]);
+  await j.cmd("approve_servicing","direksi",{servicing_id:id});
+  rows=await f.call("/applications/"+j.a.id+"/servicing");
+  assert.equal(rows[0].status,"APPROVED_PENDING_ISSUANCE");
+  assert.deepEqual(rows[0].approved_roles,["MPO","DIREKSI"]);
+  f.sqlite.close();
+});
+
+test("verified MAP-BG replacement after risk review requires new assessment",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const id=await reviewedServicing(j);
+  await j.doc("MAP_BG","analyst");
+  assert.equal((await j.cmd("approve_servicing","mpo",{servicing_id:id},409)).code,"DOCUMENT");
+  const s=new Store(f.db);
+  assert.equal(s.get("servicing",id).status,"PARTNER_ENDORSED");
+  assert.equal(s.rows("approvals").filter(x=>x.servicing_id===id).length,0);
+  f.sqlite.close();
+});
+
+test("no-op amendment cannot advance even with a verified request",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.active();
+  const document=await j.doc("AMENDMENT_REQUEST","principal");
+  assert.equal((await j.cmd("request_servicing","principal",{
+    kind:"AMENDMENT",document,
+    proposed_amount:j.a.amount,reason:"Tidak ada perubahan nominal"},409)).code,"SERVICING");
+  assert.equal(new Store(f.db).rows("servicing").length,0);
+  f.sqlite.close();
+});
+
+
+function visitData(photo_document,changes={}){
+ return {
+  visited_at:"2026-10-28T06:00:00Z",
+  customer_type:"DEBITUR BARU",request_type:"PENERBITAN BANK GARANSI",
+  referral:"INFORMASI TIM CABANG",
+  location:{key_person:"DIREKTUR PROYEK",phone:"+6281234567890",
+   street:"Jalan Pengujian Nomor 12",village:"Kelurahan Sukamaju",
+   city:"Depok",distance_km:12.5},
+  environment:"KOMERSIAL_BISNIS",
+  facilities_within_1km:["Kantor pelayanan publik","Pusat perdagangan"],
+  notes:"Lokasi dan kegiatan proyek telah dijelaskan oleh pengurus saat kunjungan.",
+  photo_categories:["TAMPAK_MUKA","LINGKUNGAN_SEKITAR","NASABAH_DAN_RM"],
+  photo_document,attested:true,
+  ...changes,
+ };
+}
+async function approvedVisit(j){
+ const photos=await j.doc("LKN_PHOTOS","ao");
+ await j.cmd("record_visit","ao",visitData(photos));
+ const current=(await j.f.call("/applications/"+j.a.id+"/visit")).current;
+ assert.equal(current.status,"PENDING_BM_REVIEW");
+ const signed=await j.doc("LKN","ao");
+ await j.cmd("review_visit","mpo",{accepted:true,reason:"Bukti dan keterangan RM ditinjau",report_document:signed});
+ return (await j.f.call("/applications/"+j.a.id+"/visit")).current;
+}
+test("LKN digital form persists field evidence and independent BM review",async()=>{
+ const f=fixture(),j=new Journey(f);
+ await j.create();
+ const photo=await j.doc("LKN_PHOTOS","ao");
+ assert.equal((await j.cmd("record_visit","principal",visitData(photo),403)).code,"FORBIDDEN");
+ assert.equal((await j.cmd("record_visit","ao",visitData(photo,{attested:false}),422)).code,"VISIT");
+ await j.cmd("record_visit","ao",visitData(photo));
+ await f.login("ao");
+ let snapshot=await f.call("/applications/"+j.a.id+"/visit");
+ assert.equal(snapshot.conditional,true);
+ assert.equal(snapshot.current.rm,"ao");
+ assert.equal(snapshot.current.location.city,"Depok");
+ assert.equal(snapshot.current.environment,"KOMERSIAL_BISNIS");
+ assert.equal(snapshot.current.status,"PENDING_BM_REVIEW");
+ assert.equal((await j.cmd("record_visit","ao",visitData(photo),409)).code,"VISIT");
+ const signed=await j.doc("LKN","ao");
+ assert.equal((await j.cmd("review_visit","ao",{
+  accepted:true,reason:"Review disetujui oleh RM sendiri",report_document:signed},403)).code,"FORBIDDEN");
+ await j.cmd("review_visit","mpo",{
+  accepted:true,reason:"Dokumen disetujui setelah pemeriksaan lapangan",report_document:signed});
+ snapshot=await f.call("/applications/"+j.a.id+"/visit");
+ assert.equal(snapshot.current.status,"REVIEWED");
+ assert.equal(snapshot.current.bm,"mpo");
+ assert.equal(snapshot.legal_signature_verified,false);
+ await f.login("principal");
+ assert.equal((await f.call("/applications/"+j.a.id+"/visit",undefined,403)).code,"FORBIDDEN");
+ await f.login("audit");
+ assert.equal((await f.call("/audit/verify")).valid,true);
+ f.sqlite.close();
+});
+test("LKN review is blocked without latest verified signed LKN evidence",async()=>{
+ const f=fixture(),j=new Journey(f);
+ await j.create();
+ const photos=await j.doc("LKN_PHOTOS","ao");
+ await j.cmd("record_visit","ao",visitData(photos));
+ const unverified=await j.doc("LKN","ao",false);
+ assert.equal((await j.cmd("review_visit","mpo",{
+  accepted:true,reason:"Review tertahan saat bukti belum diverifikasi",
+  report_document:unverified},422)).code,"DOCUMENT");
+ await f.login("mpo");
+ const snapshot=await f.call("/applications/"+j.a.id+"/visit");
+ const s=new Store(f.db);
+ assert.equal(s.get("visits",snapshot.current.id).status,"PENDING_BM_REVIEW");
+ f.sqlite.close();
+});
+test("new LKN revision and new photo evidence invalidate earlier 5C review",async()=>{
+ const f=fixture(),j=new Journey(f);
+ await j.create();
+ const original=await approvedVisit(j);
+ for(const kind of ["NIB","CONTRACT","KYB"])await j.doc(kind);
+ const financial=await j.doc("LAPORAN_KEUANGAN","analyst");
+ await j.cmd("submit","principal");
+ await j.cmd("kyb_pass","compliance",{screening_clear:true,ubo_verified:true});
+ const slik=await j.doc("SLIK","analyst");
+ await j.cmd("record_slik","analyst",{document:slik,
+  collectibility:1,pulled_at:new Date(f.now).toISOString()});
+ await j.cmd("partner_start","penjamin");
+ const sp2=await j.doc("SP2KBG","penjamin");
+ await j.cmd("sp2_issue","penjamin",{document:sp2,reference:"SP2-LKN-CHECK",
+  issuing_unit:"CABANG-UJI",amount:j.a.amount,valid_to:"2027-01-01"});
+ const five_c=Object.fromEntries(["character","capacity","capital","collateral","condition"]
+  .map(k=>[k,{risk:"LOW",finding:"Temuan kunjungan telah diverifikasi",
+    mitigation:"Pengawasan dokumen dan kondisi proyek"}]));
+ const form={
+  five_c,financial_document:financial,
+  financials:{current_assets:"200",current_liabilities:"100",total_debt:"50",equity:"200"},
+  recommendation:"LAYAK",narrative:"Analisis dikaitkan dengan LKN dan evidence"};
+ await j.cmd("record_5c","analyst",form);
+ await f.login("analyst");
+ const before=await f.call("/applications/"+j.a.id+"/enterprise");
+ assert.equal(before.underwriting.visit_id,original.id);
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"Hasil LKN dan 5C konsisten"});
+ await j.doc("LKN_PHOTOS","ao"); // replacing current evidence invalidates approved LKN
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"DOCUMENT");
+ const photo=await j.doc("LKN_PHOTOS","ao");
+ await j.cmd("record_visit","ao",visitData(photo,{notes:"Hasil kunjungan revisi dan peninjauan lapangan telah diperbarui."}));
+ const signed=await j.doc("LKN","ao");
+ await j.cmd("review_visit","mpo",{accepted:true,reason:"Kunjungan ulang disetujui",
+   report_document:signed});
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"UNDERWRITING");
+ await j.cmd("record_5c","analyst",form);
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"Analisis ulang LKN dan 5C telah diperiksa"});
+ await j.cmd("bank_underwrite","analyst");
+ assert.equal(j.a.state,"APPROVAL");
+ f.sqlite.close();
+});
+test("LKN rejects malformed location and external-application photo evidence",async()=>{
+ const f=fixture(),j=new Journey(f),other=new Journey(f);
+ await j.create();
+ const unrelated=await other.create({project_name:"Proyek Lain"});
+ const photo=await other.doc("LKN_PHOTOS","ao");
+ assert.equal((await j.cmd("record_visit","ao",visitData(photo),422)).code,"DOCUMENT");
+ const own=await j.doc("LKN_PHOTOS","ao");
+ assert.equal((await j.cmd("record_visit","ao",visitData(own,{
+  environment:"ZONA_PENGUJIAN_TIDAK_DISETUJUI"}),422)).code,"VISIT");
+ assert.equal((await j.cmd("record_visit","ao",visitData(own,{
+  location:{...visitData(own).location,distance_km:-4}}),422)).code,"VISIT");
+ assert.equal(new Store(f.db).rows("visits").length,0);
+ f.sqlite.close();
+});
+
+test("LKN photo bundles reject ordinary text and require a PDF container",async()=>{
+ const f=fixture(),j=new Journey(f);
+ await j.create();
+ await f.login("ao");
+ const response=await f.call("/applications/"+j.a.id+"/documents",{
+  kind:"LKN_PHOTOS",source_reference:"Kunjungan nasabah RM",
+  content_base64:Buffer.from("Foto yang dinyatakan tanpa PDF").toString("base64"),
+ },422);
+ assert.equal(response.code,"DOCUMENT");
+ assert.equal(new Store(f.db).rows("documents",{application_id:j.a.id})
+   .filter(d=>d.kind==="LKN_PHOTOS").length,0);
+ f.sqlite.close();
+});
+
+
+function standardPayload(j,docs,overrides={}){
+ return {
+  checklist_complete:true,
+  owner:"PEMERINTAH_PUSAT",owner_other:"",
+  project_type:"KONSTRUKSI",project_type_other:"",
+  project_value:"4000000000",funding_source:"APBN_APBD",funding_other:"",
+  project_document:docs.contract,contract_reference:"KONTRAK-BG-SANDBOX-01",
+  contract_date:"2026-10-01",completion_months:6,
+  guarantee_amount:j.a.amount,guarantee_type:"KONTRA_BANK_GARANSI",guarantee_other:"",
+  customer_relationship:"DEBITUR_EKSIS",business_years:3,
+  management:"Dewan Direksi dan Manajemen telah diverifikasi RM",
+  slik_document:docs.slik,slik_comment:"Hasil SLIK didukung dokumen iDEB resmi dan diteliti manual",
+  projects_completed:5,projects_last_year:2,last_year_project_value:"5000000000",
+  business_condition:"Proyek berjalan dengan kondisi usaha yang telah diuji",
+  profit_history:[{year:2025,profit:"210000000"},{year:2024,profit:"-17000000"}],
+  financial_document:docs.financial,
+  bank_support:"ADA",bank_support_details:"Fasilitas transaksi bank yang telah dibuktikan",
+  additional_collateral:"0",collateral_type_other:"",
+  recommendation:"LAYAK",
+  reason:"Nasabah memiliki dasar permohonan dan arus usaha yang diuji manual",
+  ...overrides
+ };
+}
+async function standardJourney(f){
+ const j=new Journey(f);
+ await j.create();
+ const contract=await j.doc("CONTRACT");
+ for(const kind of ["NIB","KYB"])await j.doc(kind);
+ await j.cmd("submit","principal");
+ await j.cmd("kyb_pass","compliance",{screening_clear:true,ubo_verified:true});
+ const slik=await j.doc("SLIK","analyst");
+ await j.cmd("record_slik","analyst",{
+  document:slik,collectibility:1,pulled_at:new Date(f.now).toISOString()
+ });
+ await j.cmd("partner_start","penjamin");
+ const sp2=await j.doc("SP2KBG","penjamin");
+ await j.cmd("sp2_issue","penjamin",{document:sp2,reference:"SP2-STANDARD-2026",
+   issuing_unit:"CABANG-UJI",amount:j.a.amount,valid_to:"2027-01-01"});
+ const financial=await j.doc("LAPORAN_KEUANGAN","analyst");
+ return {j,docs:{contract,slik,financial}};
+}
+async function acceptedStandard(j,docs,payload){
+ await j.cmd("record_standard_analysis","ao",payload||standardPayload(j,docs));
+ await j.cmd("review_standard_analysis","mpo",{accepted:true,
+  reason:"Pemeriksaan independen atas seluruh data Lampiran 5"});
+ return (await j.f.call("/applications/"+j.a.id+"/standard-analysis")).current;
+}
+function fiveCAnalytic(financial){
+ const five_c=Object.fromEntries(["character","capacity","capital","collateral","condition"]
+ .map(k=>[k,{risk:"LOW",finding:"Temuan didukung bukti yang diverifikasi",
+    mitigation:"Pengawasan data, risiko, dan agunan berjalan"}]));
+ return {financial_document:financial,five_c,
+  financials:{current_assets:"900000000",current_liabilities:"200000000",
+   total_debt:"300000000",equity:"900000000"},
+  recommendation:"LAYAK",narrative:"Hasil analisis 5C mengacu Formulir Standar Analisa dan dokumen sumber"};
+}
+test("Lampiran 5 form captures exact source project, 5C and profit fields without auto scoring",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ const data=standardPayload(j,docs);
+ await j.cmd("record_standard_analysis","ao",data);
+ await f.login("analyst");
+ const snapshot=await f.call("/applications/"+j.a.id+"/standard-analysis");
+ assert.equal(snapshot.current.project.owner,"PEMERINTAH_PUSAT");
+ assert.equal(snapshot.current.project.value,"4000000000.00");
+ assert.equal(snapshot.current.character.business_years,3); // exact threshold not auto classified
+ assert.equal(snapshot.current.condition.projects_completed,5);
+ assert.equal(snapshot.current.condition.last_year_project_value,"5000000000.00");
+ assert.equal(snapshot.current.capacity.profit_history[1].profit,"-17000000.00");
+ assert.equal(snapshot.current.source_boundary.experience_exactly_3,"UNDEFINED_IN_FORM");
+ assert.equal(snapshot.risk_score_automated,false);
+ assert.equal(snapshot.current.status,"PENDING_REVIEW");
+ assert.equal((await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial),409)).code,"STANDARD_ANALYSIS");
+ await j.cmd("review_standard_analysis","mpo",{accepted:true,
+  reason:"Rekomendasi RM diteliti secara independen"});
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ await f.login("analyst");
+ const enterprise=await f.call("/applications/"+j.a.id+"/enterprise");
+ assert.equal(enterprise.underwriting.standard_analysis_id,snapshot.current.id);
+ assert.equal(enterprise.underwriting.ratios.net_working_capital,"700000000.00");
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"5C dan Formulir Standar Analisa konsisten"});
+ await j.cmd("bank_underwrite","analyst");
+ assert.equal(j.a.state,"APPROVAL");
+ f.sqlite.close();
+});
+test("Standard Analysis prevents maker self-review and bank approvals of incomplete checklist",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ await j.cmd("record_standard_analysis","ao",standardPayload(j,docs,{checklist_complete:false}));
+ assert.equal((await j.cmd("review_standard_analysis","ao",{
+  accepted:true,reason:"Ditinjau oleh pembuat yang sama"},403)).code,"FORBIDDEN");
+ assert.equal((await j.cmd("review_standard_analysis","mpo",{
+  accepted:true,reason:"Pemeriksaan dokumen belum lengkap"},422)).code,"STANDARD_ANALYSIS");
+ const view=await f.call("/applications/"+j.a.id+"/standard-analysis");
+ assert.equal(view.current.status,"PENDING_REVIEW");
+ await j.cmd("review_standard_analysis","mpo",{accepted:false,
+  reason:"Kembalikan untuk melengkapi checklist"});
+ const after=await f.call("/applications/"+j.a.id+"/standard-analysis");
+ assert.equal(after.current.status,"RETURNED");
+ assert.equal((await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial),409)).code,"STANDARD_ANALYSIS");
+ f.sqlite.close();
+});
+test("Standard Analysis prevents stale verified source documents and unreviewed revision",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ const first=await acceptedStandard(j,docs);
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"Data awal layak untuk ditelaah"});
+ const revised=standardPayload(j,docs,{business_years:10,
+  reason:"Formulir lama diperbarui berdasarkan data terbaru proyek dan pengalaman"});
+ await j.cmd("record_standard_analysis","ao",revised);
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"STANDARD_ANALYSIS");
+ await j.cmd("review_standard_analysis","mpo",{accepted:true,
+  reason:"Analisis revisi telah diperiksa"});
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"UNDERWRITING");
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"Revisi 5C baru sesuai Formulir Standar"});
+ await j.doc("CONTRACT","principal"); // latest document revision invalidates form
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"DOCUMENT");
+ const fState=await f.call("/applications/"+j.a.id+"/standard-analysis");
+ assert.notEqual(fState.current.id,first.id);
+ assert.equal(fState.history.length,2);
+ f.sqlite.close();
+});
+test("Lampiran 5 refuses bogus profit, cross-application source and unauthorized principal access",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ const other=new Journey(f);await other.create({project_name:"Other transaction"});
+ const wrong=await other.doc("LAPORAN_KEUANGAN","analyst");
+ assert.equal((await j.cmd("record_standard_analysis","ao",
+  standardPayload(j,docs,{financial_document:wrong}),422)).code,"DOCUMENT");
+ assert.equal((await j.cmd("record_standard_analysis","ao",
+  standardPayload(j,docs,{profit_history:[{year:2025,profit:"Infinity"},{year:2024,profit:"100"}]}),422)).code,"STANDARD_ANALYSIS");
+ assert.equal((await j.cmd("record_standard_analysis","ao",
+  standardPayload(j,docs,{business_years:"-5"}),422)).code,"STANDARD_ANALYSIS");
+ await f.login("principal");
+ assert.equal((await f.call("/applications/"+j.a.id+"/standard-analysis",undefined,403)).code,"FORBIDDEN");
+ assert.equal(new Store(f.db).rows("standard_analyses").length,0);
+ f.sqlite.close();
+});
+test("Lampiran 5 permits a third accounting row but never auto-approves marginal raw thresholds",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ const pack=standardPayload(j,docs,{
+  project_value:"1500000000", // source provides values, no fabricated refusal threshold
+  projects_completed:5,business_years:3,
+  last_year_project_value:"5000000000",
+  profit_history:[{year:2025,profit:"0"},{year:2024,profit:"-15000.10"},
+    {year:2023,profit:"30000"}],
+  bank_support:"TIDAK_ADA",bank_support_details:"",
+  recommendation:"TIDAK_LAYAK"
+ });
+ await j.cmd("record_standard_analysis","ao",pack);
+ const snapshot=await f.call("/applications/"+j.a.id+"/standard-analysis");
+ assert.equal(snapshot.current.project.amount_exceeds_project,true);
+ assert.equal(snapshot.current.recommendation,"TIDAK_LAYAK");
+ assert.equal(snapshot.current.capacity.profit_history.length,3);
+ assert.equal(snapshot.current.capacity.profit_history[1].profit,"-15000.10");
+ assert.equal(snapshot.current.source_boundary.completed_exactly_5,"UNDEFINED_IN_FORM");
+ assert.equal(snapshot.current.status,"PENDING_REVIEW");
+ f.sqlite.close();
+});
+
+
+test("5C maker-checker rejects superseded financial statements before independent review",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ await j.doc("LAPORAN_KEUANGAN","analyst");
+ assert.equal((await j.cmd("review_5c","mpo",{
+  accepted:true,reason:"Bukti keuangan versi lama tidak dapat diperiksa"},409)).code,"DOCUMENT");
+ const current=await f.call("/applications/"+j.a.id+"/enterprise");
+ assert.equal(current.underwriting.state,"PENDING_REVIEW");
+ f.sqlite.close();
+});
+test("5C bank underwriting rejects superseded financial statements after checker approval",async()=>{
+ const f=fixture(),{j,docs}=await standardJourney(f);
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ await j.cmd("review_5c","mpo",{
+  accepted:true,reason:"Analisis sebelumnya disetujui dari dokumen lama"});
+ await j.doc("LAPORAN_KEUANGAN","analyst");
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"DOCUMENT");
+ assert.equal(j.a.state,"SP2KBG_ISSUED");
+ f.sqlite.close();
+});
+
+
+async function activateAnalysisControls(f,controls) {
+  await f.login("admin");
+  const configuration=structuredClone(policy);
+  configuration.analysis_controls=controls;
+  const proposed=await f.call("/policies",{configuration},201);
+  await f.login("config_checker");
+  await f.call("/policies/"+proposed.id+"/approve",{});
+  assert.equal(new Store(f.db).get("policies",proposed.id).status,"ACTIVE");
+  return proposed.id;
+}
+
+test("institutional underwriting control flags are validated before policy proposal",async()=>{
+ const f=fixture();
+ await f.login("admin");
+ for(const controls of [
+  {require_five_c:true},
+  {require_standard_analysis:"yes"},
+  {require_standard_analysis:true,max_profit_age_years:0},
+  {require_counter_review:true,unknown_override:true},
+ ]) {
+  assert.equal((await f.call("/policies",{
+   configuration:{...structuredClone(policy),analysis_controls:controls}},422)).code,"POLICY");
+ }
+ assert.equal(new Store(f.db).rows("policies").length,1);
+ f.sqlite.close();
+});
+
+test("approved pinned policy makes standard analysis and independently reviewed 5C mandatory",async()=>{
+ const f=fixture();
+ const id=await activateAnalysisControls(f,{
+  require_standard_analysis:true,require_five_c:true,max_profit_age_years:2});
+ const {j,docs}=await standardJourney(f);
+ assert.equal(new Store(f.db).get("applications",j.a.id).policy_id,id);
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"STANDARD_ANALYSIS");
+ await acceptedStandard(j,docs);
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"UNDERWRITING");
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"UNDERWRITING");
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"Pemeriksa independen menyatakan data lengkap"});
+ await j.cmd("bank_underwrite","analyst");
+ assert.equal(j.a.state,"APPROVAL");
+ f.sqlite.close();
+});
+
+test("financial-year recency is configurable, not invented from Lampiran 5",async()=>{
+ const f=fixture();
+ await activateAnalysisControls(f,{
+  require_standard_analysis:true,max_profit_age_years:2});
+ const {j,docs}=await standardJourney(f);
+ const old=standardPayload(j,docs,{profit_history:[
+  {year:2022,profit:"100000"},{year:2021,profit:"50000"}]});
+ assert.equal((await j.cmd("record_standard_analysis","ao",old,409)).code,"STANDARD_ANALYSIS");
+ await j.cmd("record_standard_analysis","ao",standardPayload(j,docs,{profit_history:[
+  {year:2024,profit:"100000"},{year:2023,profit:"50000"}]}));
+ await j.cmd("review_standard_analysis","mpo",{
+  accepted:true,reason:"Laporan sesuai kebijakan maksimum usia dua tahun"});
+ await j.cmd("bank_underwrite","analyst");
+ assert.equal(j.a.state,"APPROVAL");
+ f.sqlite.close();
+});
+
+test("mandatory counter review requires latest PKS and rechecks it at formal sandbox issue",async()=>{
+ const f=fixture();
+ await activateAnalysisControls(f,{require_counter_review:true});
+ const {j}=await standardJourney(f);
+ assert.equal((await j.cmd("bank_underwrite","analyst",{},409)).code,"COUNTER");
+ const document=await j.doc("PKS","compliance");
+ const partner=new Store(f.db).get("partners",j.a.partner);
+ await j.cmd("review_counter","compliance",{
+   scheme:"CAC",pks_reference:partner.pks,pks_document:document});
+ await j.cmd("bank_underwrite","analyst");
+ await j.cmd("approve","mpo");
+ if(j.a.committee_role)await j.cmd("approve",j.a.committee_role==="GH_BISNIS"?"gh":"direksi");
+ await j.cmd("sign_mkp","mpo");
+ await j.cmd("sign_akad","principal");
+ await j.cmd("sign_akad","mpo");
+ await j.cmd("collect_fee","finance");
+ await j.doc("PKS","compliance"); // superseding a reviewed PKS invalidates authorization
+ assert.equal((await j.cmd("issue","mpo",{},409)).code,"DOCUMENT");
+ assert.equal(new Store(f.db).rows("guarantees").length,0);
+ f.sqlite.close();
+});
+
+test("new financial evidence cannot bypass approved form and 5C when issuing a sandbox BG",async()=>{
+ const f=fixture();
+ await activateAnalysisControls(f,{require_standard_analysis:true,require_five_c:true});
+ const {j,docs}=await standardJourney(f);
+ await acceptedStandard(j,docs);
+ await j.cmd("record_5c","analyst",fiveCAnalytic(docs.financial));
+ await j.cmd("review_5c","mpo",{accepted:true,reason:"Formulir serta 5C dinyatakan konsisten"});
+ await j.cmd("bank_underwrite","analyst");
+ await j.cmd("approve","mpo");
+ if(j.a.committee_role)await j.cmd("approve",j.a.committee_role==="GH_BISNIS"?"gh":"direksi");
+ await j.cmd("sign_mkp","mpo");
+ await j.cmd("sign_akad","principal");
+ await j.cmd("sign_akad","mpo");
+ await j.cmd("collect_fee","finance");
+ await j.doc("LAPORAN_KEUANGAN","analyst");
+ assert.equal((await j.cmd("issue","mpo",{},409)).code,"DOCUMENT");
+ assert.equal(new Store(f.db).rows("guarantees").length,0);
+ f.sqlite.close();
+});
+
+
+async function paidClaimJourney(){
+ const f=fixture(),j=new Journey(f);
+ await j.active();
+ let claim=await j.claim();
+ claim=await j.claimcmd(claim,"report","mpo");
+ claim=await j.claimcmd(claim,"approve_claim","mpo",{instrument_conditions_met:true});
+ claim=await j.claimcmd(claim,"pay_bank","finance");
+ assert.equal(claim.bank_payment.mode,"MOCK");
+ return {f,j,claim};
+}
+async function openedRecovery(f,j,claim){
+ const basis=await j.doc("RECOVERY_BASIS","litigation");
+ claim=await j.claimcmd(claim,"open_recovery","litigation",{
+   kind:"BANK_RECOURSE_ASSESSMENT",document:basis,
+   reason:"Asesmen pemulihan atas bank claim simulasi berdasarkan bukti primer"});
+ return {claim,basis};
+}
+
+test("recovery does not open before bank payout or invent a legal subrogation",async()=>{
+ const f=fixture(),j=new Journey(f);
+ await j.active();
+ let claim=await j.claim();
+ const basis=await j.doc("RECOVERY_BASIS","litigation");
+ assert.equal((await j.claimcmd(claim,"open_recovery","litigation",{
+  kind:"BANK_RECOURSE_ASSESSMENT",document:basis,
+  reason:"Analisa awal atas hak dan risiko bank belum lengkap"},409)).code,"RECOVERY");
+ claim=await j.claimcmd(claim,"report","mpo");
+ claim=await j.claimcmd(claim,"approve_claim","mpo",{instrument_conditions_met:true});
+ claim=await j.claimcmd(claim,"pay_bank","finance");
+ assert.equal((await j.claimcmd(claim,"open_recovery","litigation",{
+  kind:"SUBROGATION_ASSESSMENT",document:basis,
+  reason:"Subrogasi memerlukan bukti pembayaran pihak penjamin"},409)).code,"RECOVERY");
+ assert.equal(new Store(f.db).rows("recovery_cases").length,0);
+ f.sqlite.close();
+});
+
+test("bank recovery legal review is independently authorized, evidentiary and bank-only",async()=>{
+ const {f,j,claim:initial}=await paidClaimJourney();
+ let {claim}=await openedRecovery(f,j,initial);
+ await f.login("principal");
+ assert.equal((await f.call("/claims/"+claim.id+"/recovery",undefined,403)).code,"FORBIDDEN");
+ assert.equal((await j.claimcmd(claim,"review_recovery","litigation",{
+  accepted:true,reason:"Maker mencoba melakukan penilaian sendiri"},403)).code,"FORBIDDEN");
+ claim=await j.claimcmd(claim,"review_recovery","legal",{
+  accepted:true,reason:"Bukti dasar diteliti Legal untuk monitoring saja"});
+ await f.login("legal");
+ const view=await f.call("/claims/"+claim.id+"/recovery");
+ assert.equal(view.current.status,"TRACKING_ONLY");
+ assert.equal(view.events.length,2);
+ assert.equal(view.accounting_posted,false);
+ assert.equal(view.legal_rights_verified,false);
+ assert.equal(new Store(f.db).rows("journals").filter(x=>String(x.id).includes("recovery")).length,0);
+ assert.throws(()=>f.sqlite.exec("UPDATE recovery_events SET data='{}'"));
+ assert.throws(()=>f.sqlite.exec("DELETE FROM recovery_events"));
+ f.sqlite.close();
+});
+
+test("recovery actions require independent evidence review and administrative closure does not post cash",async()=>{
+ const {f,j,claim:initial}=await paidClaimJourney();
+ let {claim}=await openedRecovery(f,j,initial);
+ claim=await j.claimcmd(claim,"review_recovery","legal",{
+  accepted:true,reason:"Evaluasi dasar pemulihan disetujui untuk monitoring"});
+ const doc=await j.doc("RECOVERY_ACTION","litigation");
+ claim=await j.claimcmd(claim,"record_recovery_action","litigation",{
+  action_type:"PAYMENT_EVIDENCE",document:doc,reported_amount:"50000000",
+  reason:"Dokumen yang diklaim sebagai bukti pembayaran harus diuji manual"});
+ const snap=await f.call("/claims/"+claim.id+"/recovery");
+ const action=snap.events.find(e=>e.kind==="ACTION_RECORDED");
+ assert.equal(action.financial_recognition,false);
+ assert.equal(action.reported_amount,"50000000.00");
+ const resolution=await j.doc("RECOVERY_RESOLUTION","litigation");
+ assert.equal((await j.claimcmd(claim,"request_recovery_closure","litigation",{
+   document:resolution,reason:"Penutupan ditolak sebelum review action"},409)).code,"RECOVERY");
+ claim=await j.claimcmd(claim,"review_recovery_action","legal",{
+   action_id:action.id,accepted:true,reason:"Bukti diterima untuk catatan administratif saja"});
+ assert.equal((await j.claimcmd(claim,"review_recovery_action","legal",{
+   action_id:action.id,accepted:true,reason:"Review ganda tidak boleh dilakukan"},409)).code,"RECOVERY");
+ const countBefore=new Store(f.db).rows("journals").length;
+ claim=await j.claimcmd(claim,"request_recovery_closure","litigation",{
+  document:resolution,reason:"Penutupan monitoring diusulkan dan akan dicek Legal"});
+ claim=await j.claimcmd(claim,"confirm_recovery_closure","legal",{
+  accepted:true,reason:"Pemeriksaan administrasi selesai tanpa pengakuan kas"});
+ const final=await f.call("/claims/"+claim.id+"/recovery");
+ assert.equal(final.current.status,"CLOSED_TRACKING_ONLY");
+ assert.equal(final.current.accounting_posted,false);
+ assert.equal(new Store(f.db).rows("journals").length,countBefore);
+ f.sqlite.close();
+});
+
+test("recovery superseded documents and foreign-application evidence fail closed",async()=>{
+ const {f,j,claim:initial}=await paidClaimJourney();
+ const other=new Journey(f);
+ await other.create({project_name:"Proyek lain untuk uji isolasi bukti"});
+ const wrong=await other.doc("RECOVERY_BASIS","litigation");
+ assert.equal((await j.claimcmd(initial,"open_recovery","litigation",{
+  kind:"BANK_RECOURSE_ASSESSMENT",document:wrong,
+  reason:"Dokumen dari permohonan lain harus ditolak"},422)).code,"DOCUMENT");
+ let {claim}=await openedRecovery(f,j,initial);
+ await j.doc("RECOVERY_BASIS","litigation");
+ assert.equal((await j.claimcmd(claim,"review_recovery","legal",{
+  accepted:true,reason:"Tidak boleh menyetujui dokumen yang sudah diganti"},409)).code,"DOCUMENT");
+ assert.equal(new Store(f.db).get("recovery_cases",claim.recovery_id).status,"PENDING_LEGAL_REVIEW");
+ f.sqlite.close();
+});
+
+
+test("recovery refuses subsequent actions when the legally reviewed basis is superseded",async()=>{
+ const {f,j,claim:initial}=await paidClaimJourney();
+ let {claim}=await openedRecovery(f,j,initial);
+ claim=await j.claimcmd(claim,"review_recovery","legal",{
+  accepted:true,reason:"Legal telah memeriksa dasar pemulihan awal"});
+ const actionDocument=await j.doc("RECOVERY_ACTION","litigation");
+ await j.doc("RECOVERY_BASIS","litigation");
+ assert.equal((await j.claimcmd(claim,"record_recovery_action","litigation",{
+  action_type:"DEMAND",document:actionDocument,
+  reason:"Bukti dasar telah diganti dan wajib dianalisis ulang"},409)).code,"DOCUMENT");
+ assert.equal(new Store(f.db).rows("recovery_events").filter(e=>e.kind==="ACTION_RECORDED").length,0);
+ f.sqlite.close();
+});
+
+test("recovery supports multiple independently verified immutable action documents",async()=>{
+ const {f,j,claim:initial}=await paidClaimJourney();
+ let {claim}=await openedRecovery(f,j,initial);
+ claim=await j.claimcmd(claim,"review_recovery","legal",{
+  accepted:true,reason:"Legal menerima berkas untuk pemantauan administratif"});
+ const d1=await j.doc("RECOVERY_ACTION","litigation");
+ claim=await j.claimcmd(claim,"record_recovery_action","litigation",{
+  action_type:"DEMAND",document:d1,reason:"Permintaan klarifikasi tagihan telah dikirimkan"});
+ const d2=await j.doc("RECOVERY_ACTION","litigation");
+ claim=await j.claimcmd(claim,"record_recovery_action","litigation",{
+  action_type:"NEGOTIATION",document:d2,reason:"Negosiasi penyelesaian didukung notulensi terverifikasi"});
+ let snapshot=await f.call("/claims/"+claim.id+"/recovery");
+ const actionIds=snapshot.events.filter(e=>e.kind==="ACTION_RECORDED").map(e=>e.id);
+ assert.equal(actionIds.length,2);
+ claim=await j.claimcmd(claim,"review_recovery_action","legal",{
+  action_id:actionIds[0],accepted:true,
+  reason:"Bukti permintaan sebelumnya tetap disimpan secara immutable"});
+ claim=await j.claimcmd(claim,"review_recovery_action","legal",{
+  action_id:actionIds[1],accepted:true,
+  reason:"Tindak lanjut negosiasi diperiksa sebagai bukti terpisah"});
+ const resolution=await j.doc("RECOVERY_RESOLUTION","litigation");
+ claim=await j.claimcmd(claim,"request_recovery_closure","litigation",{
+  document:resolution,reason:"Seluruh tindakan telah diperiksa dan monitoring diajukan tutup"});
+ claim=await j.claimcmd(claim,"confirm_recovery_closure","legal",{
+  accepted:true,reason:"Penutupan administratif tidak mengubah hak maupun akuntansi"});
+ snapshot=await f.call("/claims/"+claim.id+"/recovery");
+ assert.equal(snapshot.current.status,"CLOSED_TRACKING_ONLY");
+ assert.equal(snapshot.events.filter(e=>e.kind==="ACTION_REVIEWED").length,2);
+ f.sqlite.close();
 });
