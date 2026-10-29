@@ -1,3 +1,4 @@
+import { PRINCIPAL_VISIBLE_DOCUMENT_KINDS } from "./document-scope.ts";
 import {
   Store,
   DomainError,
@@ -544,13 +545,19 @@ export class Service {
       BANK.has(actor.role) ||
       ["PRINCIPAL", "PENJAMIN"].includes(actor.role)
     ) {
-      out.workflow = structuredClone(a);
-      out.documents = this.docs(a).map((d) => ({
-        id: d.id,
-        kind: d.kind,
-        sha256: d.digest,
-        verified: d.verified,
-      }));
+      // Internal underwriting and bank decisions never leave the bank scope.
+      if (BANK.has(actor.role)) out.workflow = structuredClone(a);
+      out.documents = this.docs(a)
+        .filter((d) =>
+          actor.role !== "PRINCIPAL" ||
+          PRINCIPAL_VISIBLE_DOCUMENT_KINDS.includes(d.kind),
+        )
+        .map((d) => ({
+          id: d.id,
+          kind: d.kind,
+          sha256: d.digest,
+          verified: d.verified,
+        }));
     }
     if (actor.role === "OBLIGEE")
       out.documents = this.docs(a)
@@ -1534,6 +1541,7 @@ export class Service {
       a = this.s.get("applications", doc.application_id);
     this.access(actor, a);
     const scopes: Data = {
+      PRINCIPAL: PRINCIPAL_VISIBLE_DOCUMENT_KINDS,
       PENJAMIN: [
         "SP2KBG",
         "CONTRACT",
