@@ -1607,3 +1607,49 @@ test("recovery superseded documents and foreign-application evidence fail closed
  assert.equal(new Store(f.db).get("recovery_cases",claim.recovery_id).status,"PENDING_LEGAL_REVIEW");
  f.sqlite.close();
 });
+
+
+test("recovery refuses subsequent actions when the legally reviewed basis is superseded",async()=>{
+ const {f,j,claim:initial}=await paidClaimJourney();
+ let {claim}=await openedRecovery(f,j,initial);
+ claim=await j.claimcmd(claim,"review_recovery","legal",{
+  accepted:true,reason:"Legal telah memeriksa dasar pemulihan awal"});
+ const actionDocument=await j.doc("RECOVERY_ACTION","litigation");
+ await j.doc("RECOVERY_BASIS","litigation");
+ assert.equal((await j.claimcmd(claim,"record_recovery_action","litigation",{
+  action_type:"DEMAND",document:actionDocument,
+  reason:"Bukti dasar telah diganti dan wajib dianalisis ulang"},409)).code,"DOCUMENT");
+ assert.equal(new Store(f.db).rows("recovery_events").filter(e=>e.kind==="ACTION_RECORDED").length,0);
+ f.sqlite.close();
+});
+
+test("recovery supports multiple independently verified immutable action documents",async()=>{
+ const {f,j,claim:initial}=await paidClaimJourney();
+ let {claim}=await openedRecovery(f,j,initial);
+ claim=await j.claimcmd(claim,"review_recovery","legal",{
+  accepted:true,reason:"Legal menerima berkas untuk pemantauan administratif"});
+ const d1=await j.doc("RECOVERY_ACTION","litigation");
+ claim=await j.claimcmd(claim,"record_recovery_action","litigation",{
+  action_type:"DEMAND",document:d1,reason:"Permintaan klarifikasi tagihan telah dikirimkan"});
+ const d2=await j.doc("RECOVERY_ACTION","litigation");
+ claim=await j.claimcmd(claim,"record_recovery_action","litigation",{
+  action_type:"NEGOTIATION",document:d2,reason:"Negosiasi penyelesaian didukung notulensi terverifikasi"});
+ let snapshot=await f.call("/claims/"+claim.id+"/recovery");
+ const actionIds=snapshot.events.filter(e=>e.kind==="ACTION_RECORDED").map(e=>e.id);
+ assert.equal(actionIds.length,2);
+ claim=await j.claimcmd(claim,"review_recovery_action","legal",{
+  action_id:actionIds[0],accepted:true,
+  reason:"Bukti permintaan sebelumnya tetap disimpan secara immutable"});
+ claim=await j.claimcmd(claim,"review_recovery_action","legal",{
+  action_id:actionIds[1],accepted:true,
+  reason:"Tindak lanjut negosiasi diperiksa sebagai bukti terpisah"});
+ const resolution=await j.doc("RECOVERY_RESOLUTION","litigation");
+ claim=await j.claimcmd(claim,"request_recovery_closure","litigation",{
+  document:resolution,reason:"Seluruh tindakan telah diperiksa dan monitoring diajukan tutup"});
+ claim=await j.claimcmd(claim,"confirm_recovery_closure","legal",{
+  accepted:true,reason:"Penutupan administratif tidak mengubah hak maupun akuntansi"});
+ snapshot=await f.call("/claims/"+claim.id+"/recovery");
+ assert.equal(snapshot.current.status,"CLOSED_TRACKING_ONLY");
+ assert.equal(snapshot.events.filter(e=>e.kind==="ACTION_REVIEWED").length,2);
+ f.sqlite.close();
+});
