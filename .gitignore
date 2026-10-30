@@ -14,3 +14,8 @@ playwright-results/
 .dev.vars.*
 .env.*
 !.env.example
+
+# Local BG UAT only: never commit identities, passwords, generated results
+.uat-password
+evidence/uat-browser-role-*.json
+evidence/uat-ui-regression-*.json
