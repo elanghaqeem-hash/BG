@@ -106,6 +106,8 @@ test("Guarantor and internal administrator cannot bypass document download scope
 test("Configuration checker cannot upload bank-only evidence through an authenticated API route", () => {
   const f = bank();
   try {
+    // The source fixture retains its application in the current Store cache until flush.
+    f.service.flush();
     const s = new Store(f.service.s.db);
     const user = s.rows("users").find((row) => row.username === "config_checker");
     assert.ok(user, "Configuration checker sandbox identity must exist");
