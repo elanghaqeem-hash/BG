@@ -1,3 +1,4 @@
+import { publicVerificationUrl } from "./public-verification-url.ts";
 import { DurableObject } from "cloudflare:workers";
 import {
   initializeSchema,
@@ -148,7 +149,8 @@ export class BankBackend extends DurableObject<CloudflareEnv> {
           "BG tidak ditemukan",
           404,
         );
-        const image = await qr(url.origin + "/verify/" + path[2]);
+        const configuredOrigin = (this.env as CloudflareEnv & { BG_PUBLIC_VERIFY_ORIGIN?: string }).BG_PUBLIC_VERIFY_ORIGIN;
+        const image = await qr(publicVerificationUrl(configuredOrigin, url.origin, path[2]));
         return new Response(image, {
           headers: {
             "Content-Type": "image/png",
