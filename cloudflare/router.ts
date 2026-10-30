@@ -472,7 +472,7 @@ export function route(service: Service, input: Input): Response {
       403,
     );
     req(
-      !["AUDIT", "MONITOR", "ADMIN", "WORKER"].includes(a.role),
+      !["AUDIT", "MONITOR", "ADMIN", "CONFIG_CHECKER", "WORKER"].includes(a.role),
       "FORBIDDEN",
       "Peran hanya baca/administratif",
       403,
