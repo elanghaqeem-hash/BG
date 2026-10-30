@@ -1,3 +1,4 @@
+import { PRINCIPAL_VISIBLE_DOCUMENT_KINDS, BROKER_VISIBLE_DOCUMENT_KINDS } from "./document-scope.ts";
 import {
   Store,
   DomainError,
@@ -48,6 +49,12 @@ export const BANK = new Set([
   "WORKER",
 ]);
 export const OPS = ["MPO", "SUPPORT", "MPO_KPO", "KADEP_SUPPORT"];
+/** Bank transaction readers; system administration is not a data-access role. */
+const BANK_DOCUMENT_ROLES = new Set([
+  "AO", "ANALYST", "COMPLIANCE", "MPO", "SUPPORT", "MPO_KPO",
+  "KADEP_SUPPORT", "GH_BISNIS", "DIREKSI", "FINANCE",
+  "LITIGATION", "LEGAL", "AUDIT",
+]);
 const ACTIVE = [
   "BG_ISSUED",
   "KONTRA_BG_ISSUED",
@@ -540,25 +547,49 @@ export class Service {
       ...Object.fromEntries(fields.map((k) => [k, a[k] ?? null])),
       documents: [],
     };
-    if (["PRINCIPAL","BROKER","PENJAMIN"].includes(actor.role) || BANK.has(actor.role)) {
-      out.document_checklist = buildDocumentChecklist(a, this.docs(a), actor.role);
+    if (["PRINCIPAL","BROKER","PENJAMIN"].includes(actor.role) || BANK_DOCUMENT_ROLES.has(actor.role)) {
+      const checklist = buildDocumentChecklist(a, this.docs(a), actor.role);
+      // The checklist also contains UUIDs, verification status and bank-only
+      // work items. Do not let an external party enumerate internal evidence.
+      const scope = actor.role === "PRINCIPAL"
+        ? PRINCIPAL_VISIBLE_DOCUMENT_KINDS
+        : actor.role === "BROKER"
+          ? BROKER_VISIBLE_DOCUMENT_KINDS
+          : null;
+      if (scope) {
+        // Preserve full checklist/status visibility for applicant progress,
+        // but never disclose UUIDs of bank-only evidence that the actor
+        // cannot list or download.
+        out.document_checklist = {
+          ...checklist,
+          items: checklist.items.map((item) =>
+            scope.includes(item.kind)
+              ? item
+              : { ...item, document_id: null },
+          ),
+        };
+      } else {
+        out.document_checklist = checklist;
+      }
     }
-    if (BANK.has(actor.role) || ["PRINCIPAL", "PENJAMIN"].includes(actor.role)) {
-      if (BANK.has(actor.role)) out.workflow = structuredClone(a);
-      out.documents = this.docs(a).filter(d => actor.role !== "PRINCIPAL" || [
-        "AMENDMENT_REQUEST","NIB","CONTRACT","KYB","PRINCIPAL_REQUEST","MANDATE",
-        "AKTA_PENDIRIAN","IDENTITAS_PENGURUS","NPWP","TDR","LAPORAN_KEUANGAN",
-        "SIUJK","ASOSIASI_PROFESI","IZIN_LAINNYA","UNDANGAN_TENDER",
-        "PERMOHONAN_BG","PERMOHONAN_KBG","FORMAT_TEMPLATE","SP2D_SATKER",
-        "SP2D_PERJANJIAN","SP2D_KPPN","BUKTI_BIAYA","SURAT_KUASA_PEMBLOKIRAN",
-        "DRAFT_BG","MKP","AKAD","BG","CERTIFICATE","DELIVERY"
-      ].includes(d.kind)).map((d) => ({
-        id: d.id,
-        kind: d.kind,
-        sha256: d.digest,
-        verified: d.verified,
-        media_type: d.media_type || "application/octet-stream",
-      }));
+    if (
+      BANK_DOCUMENT_ROLES.has(actor.role) ||
+      ["PRINCIPAL", "PENJAMIN"].includes(actor.role)
+    ) {
+      // Internal underwriting and bank decisions never leave the bank scope.
+      if (BANK_DOCUMENT_ROLES.has(actor.role)) out.workflow = structuredClone(a);
+      out.documents = this.docs(a)
+        .filter((d) =>
+          actor.role !== "PRINCIPAL" ||
+          PRINCIPAL_VISIBLE_DOCUMENT_KINDS.includes(d.kind),
+        )
+        .map((d) => ({
+          id: d.id,
+          kind: d.kind,
+          sha256: d.digest,
+          verified: d.verified,
+          media_type: d.media_type || "application/octet-stream",
+        }));
     }
     if (actor.role === "OBLIGEE")
       out.documents = this.docs(a)
@@ -1542,6 +1573,7 @@ export class Service {
       a = this.s.get("applications", doc.application_id);
     this.access(actor, a);
     const scopes: Data = {
+      PRINCIPAL: PRINCIPAL_VISIBLE_DOCUMENT_KINDS,
       PENJAMIN: [
         "SP2KBG",
         "CONTRACT",
@@ -1550,7 +1582,7 @@ export class Service {
         "CERTIFICATE",
       ],
       OBLIGEE: ["BG", "CLAIM", "WITHDRAWAL", "DELIVERY"],
-      BROKER: ["NIB", "CONTRACT", "PRINCIPAL_REQUEST"],
+      BROKER: BROKER_VISIBLE_DOCUMENT_KINDS,
     };
     if (scopes[actor.role])
       req(
@@ -1560,7 +1592,7 @@ export class Service {
         403,
       );
     req(
-      !["ADMIN", "MONITOR", "WORKER"].includes(actor.role),
+      !["ADMIN", "MONITOR", "CONFIG_CHECKER", "WORKER"].includes(actor.role),
       "FORBIDDEN",
       "Tidak berwenang membaca isi dokumen",
       403,
