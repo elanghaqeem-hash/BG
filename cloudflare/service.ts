@@ -188,6 +188,7 @@ export class Service {
     raw: Uint8Array,
     source = "",
     generated = false,
+    mediaType = "application/octet-stream",
   ) {
     req(
       raw.length > 0 && raw.length <= 2000000,
@@ -202,6 +203,7 @@ export class Service {
       kind,
       revision: this.docs(a).filter(d=>d.kind===kind).length+1,
       digest: hash(raw),
+      media_type: mediaType,
       iv: encrypted.iv,
       tag: encrypted.tag,
       created_at: this.iso,
@@ -519,6 +521,7 @@ export class Service {
     this.access(actor, a);
     const fields = [
       "project_name",
+      "project_reference","project_source","project_value","project_start_on","project_end_on","guarantee_scheme",
       "amount",
       "currency",
       "bg_type",
@@ -585,6 +588,7 @@ export class Service {
           kind: d.kind,
           sha256: d.digest,
           verified: d.verified,
+          media_type: d.media_type || "application/octet-stream",
         }));
     }
     if (actor.role === "OBLIGEE")

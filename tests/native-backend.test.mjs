@@ -1653,3 +1653,43 @@ test("recovery supports multiple independently verified immutable action documen
  assert.equal(snapshot.events.filter(e=>e.kind==="ACTION_REVIEWED").length,2);
  f.sqlite.close();
 });
+
+test("portal UAT: messages stay in correct role scope and are audited",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.create();
+  const base="/applications/"+j.a.id+"/messages";
+  await f.login("principal");
+  const sent=await f.call(base,{recipient:"BANK",topic:"KELENGKAPAN_DOKUMEN",message:"Mohon konfirmasi kelengkapan NIB"},201);
+  assert.equal(sent.from,"PRINCIPAL");
+  await f.login("penjamin");
+  assert.equal((await f.call(base)).length,0,"Penjamin tidak boleh melihat pesan Principal ke Bank");
+  await f.login("mpo");
+  assert.equal((await f.call(base)).length,1);
+  await f.call(base,{recipient:"PENJAMIN",topic:"JADWAL_KUNJUNGAN",message:"Mohon tentukan tanggal kunjungan"},201);
+  await f.login("penjamin");
+  const inbox=await f.call(base);
+  assert.equal(inbox.length,1);
+  assert.equal(inbox[0].topic,"JADWAL_KUNJUNGAN");
+  await f.login("principal");
+  assert.equal((await f.call(base)).length,1,"Principal tidak melihat komunikasi Bank-Penjamin");
+  const invalid=await f.call(base,{recipient:"BANK",topic:"PERIKSA_LIVE",message:"Tidak boleh lolos"},422);
+  assert.equal(invalid.code,"TOPIC");
+  await f.login("broker");
+  await f.call(base,undefined,404);
+  await f.login("obligee");
+  await f.call(base,undefined,403);
+  await f.login("audit");
+  assert.equal((await f.call("/audit/verify")).valid,true);
+});
+test("portal UAT: JPG/PNG upload persists correctly without pretending evidence verified",async()=>{
+  const f=fixture(),j=new Journey(f);
+  await j.create();
+  const png=Uint8Array.from([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,3,32,0,0,2,88,8,2,0,0,0]);
+  const file=await f.call("/applications/"+j.a.id+"/documents",{kind:"NIB",content_base64:Buffer.from(png).toString("base64")},201);
+  assert.equal(file.media_type,"image/png");
+  assert.equal(file.verified,false);
+  const response=f.raw("/documents/"+file.id+"/download");
+  assert.match(response.headers.get("content-disposition"),/\.png/);
+  const latest=await f.call("/applications/"+j.a.id);
+  assert.equal(latest.document_checklist.items.find(x=>x.kind==="NIB").status,"PENDING");
+});

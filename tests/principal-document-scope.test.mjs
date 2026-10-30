@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { Store, initializeSchema, passwordHash } from "../cloudflare/core.ts";
+import { Store, initializeSchema, passwordHash, hash } from "../cloudflare/core.ts";
+import { route } from "../cloudflare/router.ts";
 import { bootstrap, IDENTITIES } from "../cloudflare/bootstrap.ts";
 import { Service } from "../cloudflare/service.ts";
 import { PRINCIPAL_VISIBLE_DOCUMENT_KINDS } from "../cloudflare/document-scope.ts";
@@ -96,6 +97,35 @@ test("Guarantor and internal administrator cannot bypass document download scope
       assert.equal(view.document_checklist, undefined);
       assert.throws(() => f.service.download(identity, slik.id), (error) => error.status === 403);
     }
+  } finally {
+    f.sqlite.close();
+  }
+});
+
+
+test("Configuration checker cannot upload bank-only evidence through an authenticated API route", () => {
+  const f = bank();
+  try {
+    // The source fixture retains its application in the current Store cache until flush.
+    f.service.flush();
+    const s = new Store(f.service.s.db);
+    const user = s.rows("users").find((row) => row.username === "config_checker");
+    assert.ok(user, "Configuration checker sandbox identity must exist");
+    const token = "synthetic-config-checker-session-for-negative-test";
+    const csrf = "synthetic-csrf-for-negative-test";
+    s.add("sessions", {
+      id: hash(token), user_id: user.id, csrf,
+      expires: "2026-10-28T16:00:00Z",
+    });
+    s.commit();
+    assert.throws(() => route(
+      new Service(new Store(f.service.s.db), f.service.key, Date.parse("2026-10-28T07:00:00Z")),
+      {
+        method: "POST", path: ["applications", f.app.id, "documents"],
+        body: { kind: "NIB", content_base64: Buffer.from("fake").toString("base64") },
+        cookie: "bg_session=" + token, csrf, secure: true,
+      },
+    ), (error) => error.code === "FORBIDDEN" && error.status === 403);
   } finally {
     f.sqlite.close();
   }

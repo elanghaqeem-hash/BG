@@ -26,7 +26,7 @@ export function DocumentChecklist({
   uploadable:string[];
   onUpload:(kind:string)=>void;
 }){
-  const [filter,setFilter]=useState<'ATTENTION'|'ALL'>('ATTENTION');
+  const [filter,setFilter]=useState<'ATTENTION'|'ALL'>('ALL');
   const selected=filter==='ATTENTION'
     ? checklist.items.filter(x=>x.status==='MISSING'||x.status==='PENDING')
     : checklist.items;
@@ -61,7 +61,7 @@ export function DocumentChecklist({
         </div>
         <div className="bg-checklist-actions">
           <span className={'bg-checklist-status '+i.status.toLowerCase()}>{STATUS[i.status]}</span>
-          {i.status==='MISSING'&&uploadable.includes(i.kind)?<button type="button" className="text-button" onClick={()=>onUpload(i.kind)}>Unggah</button>:null}
+          {['MISSING','UPCOMING','CONDITIONAL'].includes(i.status)&&uploadable.includes(i.kind)?<button type="button" className="text-button" onClick={()=>onUpload(i.kind)}>Unggah</button>:null}
           {i.status==='PENDING'?<small>Menunggu petugas pemeriksa</small>:null}
           {i.status==='MISSING'&&!uploadable.includes(i.kind)?<small>Hubungi petugas terkait</small>:null}
         </div>

@@ -225,3 +225,25 @@
 .bg-checklist-empty{font-size:11px;padding:14px 0}
 .bg-checklist-footnote{font-size:10px;border-top:1px solid var(--border);padding-top:14px;margin:24px 0 0;line-height:1.8}
 @media(max-width:650px){.bg-checklist-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.bg-checklist-item{align-items:flex-start;flex-direction:column}.bg-checklist-actions{width:100%;min-width:0;flex-direction:row;align-items:center;justify-content:space-between;flex-wrap:wrap}.bg-checklist-actions small{text-align:left}.bg-checklist .card-title>span{font-size:10px}}
+
+/* Principal journey and structured intake from Web BG Test UAT. */
+.bg-form-section{border:1px solid #dde8e9;border-radius:9px;padding:19px 20px 7px;margin:20px 0;min-width:0}
+.bg-form-section legend{padding:0 8px;font-weight:600;font-size:14px;color:#2a5360}
+.principal-journey ol{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.principal-journey li{border:1px solid #dbe6e8;border-radius:8px;padding:12px 8px;min-width:0;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
+.principal-journey li.current{border-color:#219887;background:#f0faf8}
+.principal-journey li.done{background:#f7faf8}
+.journey-index{display:grid;place-items:center;width:29px;height:29px;border-radius:50%;background:#e9eef0;color:#617681;font-size:12px;font-weight:600}
+.principal-journey li.current .journey-index,.principal-journey li.done .journey-index{background:#1f9786;color:white}
+.principal-journey strong{font-size:11px;line-height:1.4;display:block}
+.principal-journey small{font-size:10px;line-height:1.4;display:block;margin-top:5px}
+@media(max-width:1000px){.principal-journey ol{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:560px){.principal-journey ol{grid-template-columns:repeat(2,minmax(0,1fr))}.bg-form-section{padding:14px 12px}.bg-form-section .form-grid{grid-template-columns:1fr}}
+
+.bg-messages{max-height:300px;overflow:auto;padding:4px 0;margin-bottom:20px}
+.bg-message{border:1px solid #e2eaee;border-radius:8px;margin-bottom:9px;padding:12px 15px;background:#fafdfd}
+.bg-message>div{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.bg-message strong{font-size:11px}.bg-message small{font-size:10px;color:#71868f}
+.bg-message span{display:block;font-size:10px;color:#477c87;margin-top:6px}
+.bg-message p{white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0 0;font-size:12px;line-height:1.6}
+.bg-contact textarea{width:100%;min-height:85px}

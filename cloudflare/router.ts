@@ -22,6 +22,7 @@ import {visitSnapshot} from "./visit-reports.ts";
 import {standardAnalysisSnapshot} from "./standard-analysis.ts";
 import { IDENTITIES } from "./bootstrap.ts";
 import QRCode from "qrcode";
+import { detectUploadedFormat } from "./upload-validation.ts";
 export type Input = {
   method: string;
   path: string[];
@@ -313,6 +314,7 @@ export function route(service: Service, input: Input): Response {
         "mandate",
         "product",
         "justification",
+        "project_reference","project_source","project_value","project_start_on","project_end_on","guarantee_scheme",
       ],
       [
         "principal",
@@ -327,6 +329,13 @@ export function route(service: Service, input: Input): Response {
       ],
     );
     str(b.project_name);
+    if (b.project_reference !== undefined) str(b.project_reference,0,120);
+    if (b.project_source !== undefined) req(b.project_source === "SELF_DECLARED","PROJECT","Sumber data proyek eksternal belum terintegrasi");
+    if (b.guarantee_scheme !== undefined) req(b.guarantee_scheme === "COUNTER_BG","SCHEME","Skema setoran jaminan / surety langsung belum didukung",422);
+    if (b.project_value !== undefined) req(Number.isFinite(Number(b.project_value)) && Number(b.project_value)>0,"PROJECT","Nilai proyek tidak valid");
+    for(const field of ["project_start_on","project_end_on"]) if(b[field] !== undefined)
+      req(typeof b[field]==="string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(b[field]),"PROJECT","Tanggal proyek tidak valid");
+    if(b.project_start_on && b.project_end_on) req(b.project_end_on>=b.project_start_on,"PROJECT","Tanggal akhir proyek mendahului awal",422);
     if (b.custom_format !== undefined)
       req(
         typeof b.custom_format === "boolean",
@@ -352,6 +361,43 @@ export function route(service: Service, input: Input): Response {
   }
   if (matches("applications", "*") && method === "GET")
     return json(service.view(a, s.get("applications", p[1])));
+  // Role-scoped portal inbox; external email/WhatsApp delivery is not implied.
+  if (matches("applications", "*", "messages") && ["GET","POST"].includes(method)) {
+    const app=s.get("applications",p[1]);
+    service.access(a,app);
+    const sender=BANK.has(a.role)?"BANK":String(a.role);
+    req(["BANK","PRINCIPAL","PENJAMIN","BROKER"].includes(sender),
+      "FORBIDDEN","Peran ini tidak dapat memakai komunikasi pengajuan",403);
+    if(post) req(!["AUDIT","MONITOR","ADMIN","CONFIG_CHECKER","WORKER"].includes(a.role),
+      "FORBIDDEN","Peran pengawas atau admin hanya membaca komunikasi",403);
+    const all: Data[]=Array.isArray(app.portal_messages)?app.portal_messages:[];
+    const visible=()=>all.filter((m:Data)=>sender==="BANK"||m.from===sender||m.to===sender);
+    if(!post) return json(visible());
+    fields(b,["recipient","topic","message"],["recipient","topic","message"]);
+    const recipient=str(b.recipient,1,20);
+    const allowed: Record<string,string[]>={
+      BANK:["PRINCIPAL","PENJAMIN","BROKER"],
+      PRINCIPAL:["BANK","PENJAMIN"],
+      PENJAMIN:["BANK","PRINCIPAL"],
+      BROKER:["BANK","PRINCIPAL"]
+    };
+    req(allowed[sender].includes(recipient),"RECIPIENT","Tujuan pesan tidak berwenang",403);
+    if(recipient==="BROKER"){
+      const mandate=s.maybe("mandates",app.mandate||"");
+      req(!!mandate && !mandate.revoked_at && timestamp(mandate.expires)>now,
+        "MANDATE","Tidak ada kuasa Broker yang aktif",422);
+    }
+    const topic=str(b.topic,1,30);
+    req(["KLARIFIKASI","KELENGKAPAN_DOKUMEN","JADWAL_KUNJUNGAN","LAINNYA"].includes(topic),
+      "TOPIC","Kategori pesan tidak dikenal",422);
+    const message=str(b.message,3,1000).trim();
+    req(message.length>=3,"MESSAGE","Isi pesan terlalu singkat",422);
+    req(all.length<100,"LIMIT","Batas pesan aplikasi sandbox tercapai",429);
+    const item={id:uid(),from:sender,to:recipient,topic,message,at:service.iso};
+    all.push(item);app.portal_messages=all;
+    service.audit(a,"PortalMessageCreated",app.id,{message_id:item.id,recipient,topic});
+    return json(item,201);
+  }
   if (matches("applications", "*", "commands", "*") && post) {
     fields(
       b,
@@ -397,7 +443,7 @@ export function route(service: Service, input: Input): Response {
         "AKTA_PENDIRIAN","IDENTITAS_PENGURUS","NPWP","TDR",
         "LAPORAN_KEUANGAN","SIUJK","ASOSIASI_PROFESI","IZIN_LAINNYA",
         "UNDANGAN_TENDER","PERMOHONAN_BG","PERMOHONAN_KBG",
-        "SP2D_SATKER","SP2D_PERJANJIAN","SP2D_KPPN",
+        "SP2D_SATKER","SP2D_PERJANJIAN","SP2D_KPPN","FORMAT_TEMPLATE",
         "BUKTI_BIAYA","SURAT_KUASA_PEMBLOKIRAN",
       ],
       BROKER: [
@@ -405,7 +451,7 @@ export function route(service: Service, input: Input): Response {
         "NIB","CONTRACT","KYB","PRINCIPAL_REQUEST",
         "AKTA_PENDIRIAN","IDENTITAS_PENGURUS","NPWP","TDR",
         "LAPORAN_KEUANGAN","SIUJK","ASOSIASI_PROFESI","IZIN_LAINNYA",
-        "UNDANGAN_TENDER","PERMOHONAN_BG","PERMOHONAN_KBG",
+        "UNDANGAN_TENDER","PERMOHONAN_BG","PERMOHONAN_KBG","FORMAT_TEMPLATE",
         "SP2D_SATKER","SP2D_PERJANJIAN","SP2D_KPPN",
       ],
       PENJAMIN: [
@@ -426,7 +472,7 @@ export function route(service: Service, input: Input): Response {
       403,
     );
     req(
-      !["AUDIT", "MONITOR", "ADMIN", "WORKER"].includes(a.role),
+      !["AUDIT", "MONITOR", "ADMIN", "CONFIG_CHECKER", "WORKER"].includes(a.role),
       "FORBIDDEN",
       "Peran hanya baca/administratif",
       403,
@@ -445,28 +491,26 @@ export function route(service: Service, input: Input): Response {
       "Base64 tidak valid",
     );
     const raw = Buffer.from(encoded, "base64");
-    let textSafe = false;
+    let format: ReturnType<typeof detectUploadedFormat>;
     try {
-      new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(raw);
-      textSafe = !raw.includes(0);
-    } catch {}
-    req(
-      raw.subarray(0, 5).toString() === "%PDF-" || textSafe,
-      "DOCUMENT",
-      "Hanya teks UTF-8 atau PDF",
-    );
-    if(b.kind==="LKN_PHOTOS")
-      req(raw.subarray(0,5).toString()==="%PDF-","DOCUMENT",
-        "Bukti foto LKN harus disatukan dalam PDF (maksimal 2 MB)");
+      format = detectUploadedFormat(raw);
+    } catch (e) {
+      throw new DomainError("DOCUMENT", e instanceof Error ? e.message : "Format dokumen tidak valid", 422);
+    }
+    if (b.kind === "LKN_PHOTOS")
+      req(["application/pdf","image/jpeg","image/png"].includes(format.mime),
+        "DOCUMENT", "Foto LKN hanya menerima PDF, JPG atau PNG");
     const d = service.addDocument(
       a,
       app,
       b.kind,
       raw,
       b.source_reference ? str(b.source_reference, 0, 500) : "",
+      false,
+      format.mime,
     );
     return json(
-      { id: d.id, kind: d.kind, sha256: d.digest, verified: false },
+      { id: d.id, kind: d.kind, sha256: d.digest, verified: false, media_type: format.mime },
       201,
     );
   }
@@ -495,15 +539,20 @@ export function route(service: Service, input: Input): Response {
     });
     return json({ id: d.id, verified: true });
   }
-  if (matches("documents", "*", "download") && method === "GET")
-    return new Response(service.download(a, p[1]), {
+  if (matches("documents", "*", "download") && method === "GET") {
+    const raw = service.download(a, p[1]);
+    const stored = s.get("documents", p[1]);
+    const ext: Record<string, string> = {"application/pdf":"pdf","image/jpeg":"jpg","image/png":"png","text/plain":"txt"};
+    const extension = ext[String(stored.media_type || "")] || "bin";
+    return new Response(raw, {
       headers: {
         "Content-Type": "application/octet-stream",
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": `attachment; filename="${p[1].replace(/[^a-zA-Z0-9-]/g, "")}.bin"`,
+        "Content-Disposition": `attachment; filename="${p[1].replace(/[^a-zA-Z0-9-]/g, "")}.${extension}"`,
       },
     });
+  }
   if (matches("mandates") && post) {
     fields(
       b,
