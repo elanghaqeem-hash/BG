@@ -5,7 +5,7 @@ fs.mkdirSync(qa,{recursive:true});
 const apiPort=18500,webPort=18501,base=`http://127.0.0.1:${webPort}`;
 const isolated=fs.mkdtempSync(path.join(os.tmpdir(),'bg-browser-'));
 const native=['native','workers'].includes(process.env.BG_WEB_RUNTIME);
-const env={...process.env,BG_ALLOW_LOCAL_API:'1',DATABASE_URL:'sqlite:///'+path.join(isolated,'browser.sqlite'),APP_ENV:'development',BG_ENCRYPTION_KEY:fs.readFileSync(path.join(root,'runtime/encryption.key'),'utf8').trim(),PYTHONPATH:path.join(root,'backend')+(process.env.PYTHONPATH?':'+process.env.PYTHONPATH:''),BG_API_INTERNAL_URL:`http://127.0.0.1:${apiPort}`};
+const env={...process.env,BG_ALLOW_LOCAL_API:'1',DATABASE_URL:'sqlite:///'+path.join(isolated,'browser.sqlite'),APP_ENV:'development',BG_ENCRYPTION_KEY:native?'':fs.readFileSync(path.join(root,'runtime/encryption.key'),'utf8').trim(),PYTHONPATH:path.join(root,'backend')+(process.env.PYTHONPATH?':'+process.env.PYTHONPATH:''),BG_API_INTERNAL_URL:`http://127.0.0.1:${apiPort}`};
 if(native)delete env.BG_ENCRYPTION_KEY;
 const setup=native?{status:0}:spawnSync(process.env.BG_PYTHON||'python3',['-c',"import os,json;from pathlib import Path;from scripts.bootstrap import seed;from bg.db import Store;seed(Store(os.environ['DATABASE_URL']),json.loads(Path('runtime/sandbox-credentials.json').read_text()))"],{cwd:root,env,encoding:'utf8'});
 if(setup.status!==0)throw Error('Browser test database initialization failed');
