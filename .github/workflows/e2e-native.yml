@@ -1,0 +1,52 @@
+name: BG isolated end-to-end browser and persistence UAT
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - test/bg-e2e-all-roles-20261031
+  pull_request:
+    paths:
+      - 'scripts/browser_smoke.cjs'
+      - 'scripts/native-runtime-check.mjs'
+      - '.github/workflows/e2e-native.yml'
+      - 'cloudflare/**'
+      - 'frontend/**'
+jobs:
+  native-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+      - run: npm ci
+      - run: npm test
+      - run: npm --prefix frontend ci
+      - name: Create disposable sandbox identities and key (never upload credentials)
+        run: |
+          node --experimental-strip-types scripts/provision_native.mjs
+          mkdir -p runtime evidence
+          cp runtime/native-live/credentials.json runtime/sandbox-credentials.json
+          node -e "const fs=require('fs'); const s=JSON.parse(fs.readFileSync('runtime/native-live/cloudflare-secrets.json')); fs.writeFileSync('runtime/native-test.env', 'BG_INITIAL_USERS='+String.fromCharCode(39)+s.BG_INITIAL_USERS+String.fromCharCode(39)+'\nBG_ENCRYPTION_KEY='+s.BG_ENCRYPTION_KEY+'\nBG_MODE=SANDBOX\n',{mode:0o600})"
+      - name: Build native Cloudflare portal
+        run: npm --prefix frontend run build:cloudflare
+      - name: Install headless Chromium
+        run: node frontend/node_modules/playwright/cli.js install chromium --with-deps --only-shell
+      - name: Exercise browser user journeys and role menus on isolated SQLite
+        run: BG_WEB_RUNTIME=native node scripts/browser_smoke.cjs
+      - name: Exercise durable persistence, concurrency, CSRF and rate limits
+        run: node scripts/native-runtime-check.mjs
+      - name: Publish test results only (no secrets or screenshots)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bg-isolated-e2e-results
+          path: |
+            evidence/browser.json
+            evidence/native-runtime.json
+          if-no-files-found: ignore
