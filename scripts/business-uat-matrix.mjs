@@ -55,6 +55,9 @@ try{
  record('integrity','rejected_draft_commands_leave_state_unchanged','PASS');
  const denied=await cmd('principal',id,10,'submit');assert.equal(denied.status,409);
  record('optimistic_lock','stale_version_rejected','PASS');
+ const nib=await request('principal','/applications/'+id+'/documents',{kind:'NIB',content_base64:Buffer.from('NIB sandbox source verified for UAT').toString('base64'),source_reference:'OSS UAT'},201);
+ await request('compliance','/documents/'+nib.data.id+'/verify',{source_reference:'Independent UAT source validation'},200);
+ record('evidence','nib_uploaded_and_independently_verified','PASS');
  const submitted=await cmd('principal',id,0,'submit');assert.equal(submitted.status,200,JSON.stringify(submitted.data));assert.equal(submitted.data.state,'KYC_KYB_CHECK');
  record('transition','draft_to_kyc','PASS');
  const replay=await request('principal','/applications/'+id+'/commands/submit',{expected_version:0,idempotency_key:randomUUID(),payload:{}},409);
