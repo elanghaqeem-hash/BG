@@ -21,9 +21,6 @@ async function request(user,path,body,expected){
   return {status:response.status,data};
 }
 async function login(user){
- const r=await request(user,'/auth/login',{username:user,password:creds[user]},200);
- sessions[user]={cookie:'bg_session='+r.data.csrf,csrf:r.data.csrf};
- // Cookie is deliberately taken from the Set-Cookie header, never from CSRF.
  const raw=await fetch(base+'/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:user,password:creds[user]})});
  assert.equal(raw.status,200);
  const d=await raw.json();
