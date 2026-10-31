@@ -49,7 +49,7 @@ async function main(){
     for(let i=0;i<count;i++){
       const item=nav.nth(i),name=await item.evaluate(el=>[...el.childNodes].filter(n=>n.nodeType===3).map(n=>n.textContent).join('').trim());
       await item.click();
-      await page.locator('.topbar strong').filter({hasText:name}).waitFor({timeout:10000});
+      await page.locator('.topbar > div:first-child > strong').filter({hasText:name}).waitFor({timeout:10000});
       labels.push(name);
     }
     roleMenus[role]=labels;
