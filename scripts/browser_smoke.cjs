@@ -41,6 +41,7 @@ async function main(){
   // covered by isolated domain tests, not indiscriminately clicked in a live bank.
   const allRoles=['principal','ao','analyst','compliance','mpo','issuer','support','gh','direksi','finance','finance_checker','penjamin','obligee','obligee_private','broker','litigation','legal','audit','admin','config_checker','worker'];
   const roleMenus={};
+  const roleControls={};
   for(const role of allRoles){
     await login(page,role);
     const nav=page.locator('aside nav[aria-label="Menu utama"] button');
@@ -51,12 +52,40 @@ async function main(){
       await item.click();
       await page.locator('.topbar > div:first-child > strong').filter({hasText:name}).waitFor({timeout:10000});
       labels.push(name);
+      const buttonLabels=await page.locator('main button').evaluateAll(els=>els
+        .filter(b=>b.getClientRects().length>0)
+        .map(b=>({label:(b.getAttribute('aria-label')||b.textContent||'').trim().replace(/\\s+/g,' ').slice(0,130),disabled:b.disabled,type:b.type}))
+        .filter(b=>b.label));
+      roleControls[role]??={};
+      roleControls[role][name]={visible_buttons:buttonLabels};
+      if(name==='Pengajuan'){
+        const row=page.getByRole('row').filter({hasText:projectName});
+        if(await row.count()>0 && await row.getByRole('button',{name:'Buka →'}).count()>0){
+          await row.getByRole('button',{name:'Buka →'}).click();
+          await page.getByRole('heading',{name:'Ringkasan Bank Garansi'}).waitFor({timeout:10000});
+          roleControls[role][name].detail_buttons=await page.locator('main button').evaluateAll(els=>els
+            .filter(b=>b.getClientRects().length>0)
+            .map(b=>({label:(b.getAttribute('aria-label')||b.textContent||'').trim().replace(/\\s+/g,' ').slice(0,130),disabled:b.disabled,type:b.type}))
+            .filter(b=>b.label));
+          roleControls[role][name].detail_opened=true;
+          await page.getByRole('button',{name:'← Kembali ke daftar pengajuan'}).click();
+        }else{roleControls[role][name].detail_opened=false;}
+      }
     }
     roleMenus[role]=labels;
     checks.push('role_navigation_'+role);
     await logout(page);
   }
   fs.writeFileSync(path.join(qa,'role-menus.json'),JSON.stringify(roleMenus,null,2));
+  fs.writeFileSync(path.join(root,'evidence/button-role-uat.json'),JSON.stringify({
+    kind:'observed browser controls and read-only navigation only',
+    mode:'isolated SANDBOX',
+    roleCount:allRoles.length,
+    roleMenus,
+    roleControls,
+    note:'A visible button is not marked functionally PASS without executing its guarded business action.'
+  },null,2));
+  checks.push('role_button_inventory_and_detail_navigation');
   await page.goto(base+'/verify/fake-token');await page.getByRole('heading',{name:'BG tidak ditemukan atau tidak valid'}).waitFor();checks.push('fake_qr_browser');
   const mobileContext=await browser.newContext({viewport:{width:393,height:852},isMobile:true,hasTouch:true,deviceScaleFactor:2}),mobile=await mobileContext.newPage();
   await login(mobile,'principal');assert(await mobile.evaluate(()=>document.documentElement.scrollWidth<=393&&document.querySelector('.main-shell').getBoundingClientRect().width<=393));
