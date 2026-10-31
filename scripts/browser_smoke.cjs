@@ -5,7 +5,7 @@ fs.mkdirSync(qa,{recursive:true});
 const apiPort=18500,webPort=18501,base=`http://127.0.0.1:${webPort}`;
 const isolated=fs.mkdtempSync(path.join(os.tmpdir(),'bg-browser-'));
 const native=['native','workers'].includes(process.env.BG_WEB_RUNTIME);
-const env={...process.env,BG_ALLOW_LOCAL_API:'1',DATABASE_URL:'sqlite:///'+path.join(isolated,'browser.sqlite'),APP_ENV:'development',BG_ENCRYPTION_KEY:fs.readFileSync(path.join(root,'runtime/encryption.key'),'utf8').trim(),PYTHONPATH:path.join(root,'backend')+(process.env.PYTHONPATH?':'+process.env.PYTHONPATH:''),BG_API_INTERNAL_URL:`http://127.0.0.1:${apiPort}`};
+const env={...process.env,BG_ALLOW_LOCAL_API:'1',DATABASE_URL:'sqlite:///'+path.join(isolated,'browser.sqlite'),APP_ENV:'development',BG_ENCRYPTION_KEY:native?'':fs.readFileSync(path.join(root,'runtime/encryption.key'),'utf8').trim(),PYTHONPATH:path.join(root,'backend')+(process.env.PYTHONPATH?':'+process.env.PYTHONPATH:''),BG_API_INTERNAL_URL:`http://127.0.0.1:${apiPort}`};
 if(native)delete env.BG_ENCRYPTION_KEY;
 const setup=native?{status:0}:spawnSync(process.env.BG_PYTHON||'python3',['-c',"import os,json;from pathlib import Path;from scripts.bootstrap import seed;from bg.db import Store;seed(Store(os.environ['DATABASE_URL']),json.loads(Path('runtime/sandbox-credentials.json').read_text()))"],{cwd:root,env,encoding:'utf8'});
 if(setup.status!==0)throw Error('Browser test database initialization failed');
@@ -28,28 +28,48 @@ async function main(){
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(base);await page.getByRole('heading',{name:'Masuk ke ruang kerja'}).waitFor();await page.screenshot({path:path.join(qa,'login-desktop.png'),fullPage:true});checks.push('desktop_login_render');
   await login(page,'principal');await page.screenshot({path:path.join(qa,'dashboard-desktop.png'),fullPage:true});checks.push('principal_login');
-  await page.getByRole('button',{name:'＋ Pengajuan baru'}).click();const projectName='Browser UAT '+Date.now();await page.getByLabel('Nama proyek',{exact:true}).fill(projectName);await page.getByLabel('Nominal IDR').fill('2000000000');
-  const expiry=new Date();expiry.setDate(expiry.getDate()+100);await page.getByLabel('Akhir masa berlaku').fill(expiry.toISOString().slice(0,10));
+  await page.getByRole('button',{name:'＋ Pengajuan baru'}).click();const projectName='Browser UAT '+Date.now();await page.getByLabel('Nama proyek / pekerjaan',{exact:true}).fill(projectName);await page.getByLabel('Nilai Bank Garansi (IDR)').fill('2000000000');
+  const expiry=new Date();expiry.setDate(expiry.getDate()+100);await page.getByLabel('Berakhirnya Bank Garansi').fill(expiry.toISOString().slice(0,10));
   await page.getByRole('button',{name:'Simpan draft pengajuan'}).click();await page.getByRole('heading',{name:'Ringkasan Bank Garansi'}).waitFor();checks.push('create_draft_through_ui');
-  await page.getByLabel('Referensi sumber',{exact:true}).fill('OSS sandbox browser UAT');await page.getByLabel('Berkas teks atau PDF').setInputFiles({name:'nib.txt',mimeType:'text/plain',buffer:Buffer.from('NIB fixture browser 1234567890123')});await page.getByRole('button',{name:'Unggah dokumen',exact:true}).click();await page.getByRole('status').filter({hasText:'Bukti tersimpan'}).waitFor();checks.push('evidence_upload_through_ui');
+  await page.getByLabel('Referensi berkas (opsional saat unggah)',{exact:true}).fill('OSS sandbox browser UAT');await page.getByLabel('File PDF, JPG, PNG atau TXT').setInputFiles({name:'nib.txt',mimeType:'text/plain',buffer:Buffer.from('NIB fixture browser 1234567890123')});await page.getByRole('button',{name:'Unggah dokumen',exact:true}).click();await page.waitForFunction(()=>[...document.querySelectorAll('[role="status"], [role="alert"]')].some(el=>el.textContent.includes('Dokumen berhasil diunggah')||el.classList.contains('error')),null,{timeout:12000});const uploadStatus=(await page.locator('[role="status"], [role="alert"]').allInnerTexts()).join(' | ');assert(uploadStatus.includes('Dokumen berhasil diunggah'),'Document upload failed: '+uploadStatus);checks.push('evidence_upload_through_ui');
   await logout(page);await login(page,'compliance');await page.getByRole('row').filter({hasText:projectName}).getByRole('button',{name:'Buka →'}).click();
   page.once('dialog',dialog=>dialog.accept('Sumber primer sandbox diverifikasi petugas berbeda'));
   await page.getByRole('button',{name:'Verifikasi',exact:true}).first().click();await page.waitForFunction(()=>document.querySelectorAll('.document .badge').length>0&&![...document.querySelectorAll('.document .badge')].some(x=>x.textContent==='Pending'));checks.push('independent_document_verification');
   await logout(page);
   for(const role of ['mpo','penjamin','obligee','broker']){await login(page,role);assert(await page.getByRole('button',{name:'Keluar',exact:true}).isVisible());checks.push(role+'_portal');await logout(page)}
+  // Read-only navigation sweep for every seeded identity. Mutating controls are
+  // covered by isolated domain tests, not indiscriminately clicked in a live bank.
+  const allRoles=['principal','ao','analyst','compliance','mpo','issuer','support','gh','direksi','finance','finance_checker','penjamin','obligee','obligee_private','broker','litigation','legal','audit','admin','config_checker','worker'];
+  const roleMenus={};
+  for(const role of allRoles){
+    await login(page,role);
+    const nav=page.locator('aside nav[aria-label="Menu utama"] button');
+    const count=await nav.count();assert(count>0,role+' has no navigation');
+    const labels=[];
+    for(let i=0;i<count;i++){
+      const item=nav.nth(i),name=await item.evaluate(el=>[...el.childNodes].filter(n=>n.nodeType===3).map(n=>n.textContent).join('').trim());
+      await item.click();
+      await page.locator('.topbar > div:first-child > strong').filter({hasText:name}).waitFor({timeout:10000});
+      labels.push(name);
+    }
+    roleMenus[role]=labels;
+    checks.push('role_navigation_'+role);
+    await logout(page);
+  }
+  fs.writeFileSync(path.join(qa,'role-menus.json'),JSON.stringify(roleMenus,null,2));
   await page.goto(base+'/verify/fake-token');await page.getByRole('heading',{name:'BG tidak ditemukan atau tidak valid'}).waitFor();checks.push('fake_qr_browser');
   const mobileContext=await browser.newContext({viewport:{width:393,height:852},isMobile:true,hasTouch:true,deviceScaleFactor:2}),mobile=await mobileContext.newPage();
   await login(mobile,'principal');assert(await mobile.evaluate(()=>document.documentElement.scrollWidth<=393&&document.querySelector('.main-shell').getBoundingClientRect().width<=393));
   await mobile.getByRole('button',{name:'Buka atau tutup menu'}).click();await mobile.getByRole('button',{name:'Pengajuan',exact:false}).filter({hasText:'Pengajuan'}).first().click();
   await mobile.waitForFunction(()=>{const el=document.querySelector('.sidebar');return !el.classList.contains('open')&&new DOMMatrix(getComputedStyle(el).transform).m41<=-249});
   await mobile.screenshot({path:path.join(qa,'dashboard-mobile.png'),fullPage:true});checks.push('android_viewport_393_no_overflow');
-  await mobile.getByRole('button',{name:'＋ Pengajuan baru'}).click();await mobile.getByLabel('Akhir masa berlaku').scrollIntoViewIfNeeded();assert(await mobile.getByLabel('Akhir masa berlaku').isVisible());assert(await mobile.evaluate(()=>document.documentElement.scrollWidth<=393&&document.querySelector('.main-shell').getBoundingClientRect().width<=393));checks.push('mobile_long_form_usable');
+  await mobile.getByRole('button',{name:'＋ Pengajuan baru'}).click();await mobile.getByLabel('Berakhirnya Bank Garansi').scrollIntoViewIfNeeded();assert(await mobile.getByLabel('Berakhirnya Bank Garansi').isVisible());assert(await mobile.evaluate(()=>document.documentElement.scrollWidth<=393&&document.querySelector('.main-shell').getBoundingClientRect().width<=393));checks.push('mobile_long_form_usable');
   if(native){
     await login(page,'admin');await page.getByRole('button',{name:/Pengguna$/}).click();
     const username='native_user_'+Date.now(),initialPassword='Native-test-'+crypto.randomUUID();
     await page.getByLabel('Username baru',{exact:true}).fill(username);await page.getByLabel('Nama pengguna',{exact:true}).fill('Pengguna UAT Native');await page.getByLabel('Password awal',{exact:true}).fill(initialPassword);await page.getByLabel('Organisasi',{exact:true}).fill('principal-1');await page.getByLabel('Kantor',{exact:true}).fill('cabang-1');await page.getByRole('button',{name:'Daftarkan pengguna'}).click();await page.getByRole('cell',{name:username,exact:true}).waitFor();checks.push('admin_user_registration_through_ui');
     await logout(page);credentials[username]=initialPassword;await login(page,username);await page.getByRole('button',{name:/Keamanan$/}).click();
-    const nextPassword='Changed-test-'+crypto.randomUUID();await page.getByLabel('Password saat ini',{exact:true}).fill(initialPassword);await page.getByLabel('Password baru',{exact:true}).fill(nextPassword);await page.getByRole('button',{name:'Simpan password baru'}).click();await page.getByRole('heading',{name:'Masuk ke ruang kerja'}).waitFor();credentials[username]=nextPassword;await login(page,username);checks.push('password_change_revokes_session_and_allows_relogin');await logout(page);
+    const nextPassword='Changed-test-'+crypto.randomUUID();await page.getByLabel('Password saat ini',{exact:true}).fill(initialPassword);await page.getByLabel('Password baru',{exact:true}).fill(nextPassword);await page.getByRole('button',{name:'Simpan password baru'}).click();await page.waitForFunction(()=>!![...document.querySelectorAll('h1,h2,[role="alert"]')].find(el=>el.textContent.includes('Masuk ke ruang kerja')||el.classList.contains('error')),null,{timeout:15000});assert(await page.getByRole('heading',{name:'Masuk ke ruang kerja'}).isVisible(),'Password change failed: '+(await page.locator('[role="alert"]').allInnerTexts()).join(' | '));credentials[username]=nextPassword;await login(page,username);checks.push('password_change_revokes_session_and_allows_relogin');await logout(page);
   }
   assert.deepEqual(errors,[]);checks.push('no_uncaught_browser_errors');
   const metrics=await mobile.evaluate(()=>({innerWidth,clientWidth:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth}));

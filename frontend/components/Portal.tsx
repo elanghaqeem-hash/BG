@@ -55,7 +55,7 @@ export default function Portal(){
   async function upload(e:FormEvent<HTMLFormElement>){e.preventDefault();if(!selected)return;
     const form=e.currentTarget;const f=new FormData(form),file=f.get('file');
     if(!(file instanceof File)||file.size<1||file.size>2_000_000){setError('Pilih dokumen PDF, JPG, PNG atau TXT berukuran maksimal 2 MB.');return}
-    if(!/\\.(pdf|jpe?g|png|txt)$/i.test(file.name)){setError('Format berkas harus PDF, JPG, JPEG, PNG atau TXT.');return}
+    if(!/\.(pdf|jpe?g|png|txt)$/i.test(file.name)){setError('Format berkas harus PDF, JPG, JPEG, PNG atau TXT.');return}
     await work(async()=>{
       const bytes=new Uint8Array(await file.arrayBuffer());let binary='';
       for(let i=0;i<bytes.length;i+=32768)binary+=String.fromCharCode(...bytes.subarray(i,i+32768));
