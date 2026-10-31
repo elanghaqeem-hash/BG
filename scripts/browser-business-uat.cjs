@@ -208,6 +208,8 @@ async function main(){
   assert.equal((await as('principal',async()=>getJson('/applications/'+appId))).state,'ACTIVE');
   await upload('obligee','CLAIM');await submitClaim();
   await claimAction('mpo','report');
+  // Filing is allowed before verification, but claim approval is not.
+  await verifyPending();
   await claimAction('mpo','approve_claim');
   await claimAction('finance','pay_bank');
   await upload('litigation','RECOVERY_BASIS');await verifyPending();
