@@ -47,9 +47,9 @@ async function main(){
     const count=await nav.count();assert(count>0,role+' has no navigation');
     const labels=[];
     for(let i=0;i<count;i++){
-      const item=nav.nth(i),name=(await item.innerText()).trim();
+      const item=nav.nth(i),name=await item.evaluate(el=>[...el.childNodes].filter(n=>n.nodeType===3).map(n=>n.textContent).join('').trim());
       await item.click();
-      await page.locator('.topbar strong').filter({hasText:name.replace(/\\d+$/,'').trim()}).waitFor({timeout:10000});
+      await page.locator('.topbar strong').filter({hasText:name}).waitFor({timeout:10000});
       labels.push(name);
     }
     roleMenus[role]=labels;
