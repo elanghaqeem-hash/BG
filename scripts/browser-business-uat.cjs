@@ -10,11 +10,27 @@ const credentials=JSON.parse(fs.readFileSync(path.join(root,'runtime/sandbox-cre
 const log=fs.openSync(path.join(tmp,'workerd.log'),'w');
 const worker=spawn(process.execPath,['node_modules/wrangler/bin/wrangler.js','dev','--config','frontend/wrangler.jsonc','--ip','127.0.0.1','--port',String(port),'--local','--inspector-port','18542','--env-file','runtime/native-test.env','--persist-to',path.join(tmp,'sqlite')],{cwd:root,stdio:['ignore',log,log]});
 let browser,page,appId,projectName,claimId;
-const steps=[],observed=[];
+const steps=[],observed=[],errors=[];
+const rolePages=new Map();
 async function readiness(){for(let i=0;i<300;i++){try{let r=await fetch(base+'/api/health');if(r.ok)return}catch{}await new Promise(r=>setTimeout(r,120))}throw Error('Isolated native Worker failed to start');}
 async function login(role){await page.goto(base);await page.getByLabel('Username',{exact:true}).fill(role);await page.getByLabel('Password',{exact:true}).fill(credentials[role]);await page.getByRole('button',{name:/Masuk dengan aman/}).click();await page.getByRole('heading',{name:'Kendali jaminan, satu pandangan.'}).waitFor({timeout:15000});}
 async function logout(){await page.getByRole('button',{name:'Keluar',exact:true}).click();await page.getByRole('heading',{name:'Masuk ke ruang kerja'}).waitFor({timeout:15000});}
-async function as(role,fn){await login(role);try{return await fn()}finally{await logout()}}
+async function as(role,fn){
+  // Persist a dedicated browser context per role. The production-like per-IP
+  // authentication rate limiter rejects >30 repeated logins per minute.
+  if(!rolePages.has(role)){
+    const ctx=await browser.newContext({viewport:{width:1440,height:900}});
+    const p=await ctx.newPage();
+    p.on('pageerror',e=>errors.push(role+': '+e.message));
+    page=p;await login(role);
+    rolePages.set(role,{ctx,page:p});
+  }else{
+    page=rolePages.get(role).page;
+    await page.goto(base);
+    await page.getByRole('heading',{name:'Kendali jaminan, satu pandangan.'}).waitFor({timeout:15000});
+  }
+  return fn();
+}
 async function getJson(path){return page.evaluate(async p=>{const r=await fetch('/api'+p);return r.json()},path)}
 async function openApp(){
  await page.locator('aside nav button').filter({hasText:'Pengajuan'}).click();
@@ -167,9 +183,7 @@ async function main(){
  try{
   await readiness();
   browser=await chromium.launch({headless:true});
-  const context=await browser.newContext({viewport:{width:1440,height:900}});
-  page=await context.newPage();
-  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  // Pages are created lazily, one isolated session per identity.
   await create();
   for(const kind of ['NIB','CONTRACT','KYB'])await upload('principal',kind);
   await verifyPending();
