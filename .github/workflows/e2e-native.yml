@@ -6,6 +6,7 @@ on:
       - test/bg-e2e-all-roles-20261031
   pull_request:
     paths:
+      - 'tests/uat-enterprise.test.mjs'
       - 'scripts/browser_smoke.cjs'
       - 'scripts/native-runtime-check.mjs'
       - '.github/workflows/e2e-native.yml'
@@ -50,4 +51,6 @@ jobs:
           path: |
             evidence/browser.json
             evidence/native-runtime.json
+            evidence/enterprise-uat-20261031.json
+            evidence/button-role-uat.json
           if-no-files-found: ignore
