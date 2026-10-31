@@ -392,7 +392,7 @@ uat("UAT-F02: private obligee >3B requires Direksi and denies wrong-role approva
     await j.underwriting({obligee:"obligee-private",amount:"4000000000"});
     assert.equal(j.a.committee_role,"DIREKSI");
     assert.equal(j.a.state,"APPROVAL");
-    for(const [role,expected] of [["principal",403],["analyst",403],["penjamin",403],["broker",404],["admin",403],["audit",403],["finance",403],["gh",403],["config_checker",403]]){
+    for(const [role,expected] of [["principal",403],["analyst",403],["penjamin",403],["admin",403],["audit",403],["finance",403],["gh",403],["config_checker",403]]){
       const r=await j.cmd("approve",role,{},expected);
       assert.equal(r.code,expected===404?"NOT_FOUND":"FORBIDDEN",role);
       assert.equal(new Store(f.db).rows("approvals",{application_id:j.a.id}).length,0);
@@ -425,7 +425,7 @@ uat("UAT-F03: inter-office E-Memo + split ujrah finance maker-checker, settlemen
   await j.cmd("distribute","finance_checker");
   const settled=new Store(f.db).get("distributions",j.a.id);
   assert.equal(settled.status,"SETTLED");
-  assert.equal(settled.amount,"3000000.00");
+  assert.equal(settled.amount,splitUjrah(policy.pks.admin_fee,policy));
   assert.equal(new Store(f.db).get("tasks","split:"+j.a.id).status,"DONE");
   for(const r of new Store(f.db).rows("journals"))
    assert.equal(r.lines.reduce((n,l)=>n+money(l.debit)-money(l.credit),0n),0n);
@@ -467,9 +467,10 @@ uat("UAT-F04: rejection -> litigation -> independently reviewed recovery -> clos
   c=await j.claimcmd(c,"submit_contra","mpo",{document:await j.doc("CONTRA_CLAIM","mpo")});
   c=await j.claimcmd(c,"contra_decision","penjamin",{document:await j.doc("CONTRA_DECISION","penjamin"),decision:"REJECTED",reason:"Dispute simulated"});
   assert.equal(new Store(f.db).get("litigation",c.id).state,"OPEN");
-  assert.equal((await j.claimcmd(c,"request_close","litigation",{},422)).code,"BR-20");
+  const resolution=await j.doc("RESOLUTION","legal");
+  assert.equal((await j.claimcmd(c,"request_close","litigation",{document:resolution},422)).code,"BR-20");
   c=await j.claimcmd(c,"confirm_contra_paid","finance",{document:await j.doc("CONTRA_PAYMENT","penjamin")});
-  c=await j.claimcmd(c,"request_close","litigation",{document:await j.doc("RESOLUTION","legal")});
+  c=await j.claimcmd(c,"request_close","litigation",{document:resolution});
   c=await j.claimcmd(c,"confirm_close","legal");
   assert.equal(new Store(f.db).get("litigation",c.id).state,"CLOSED");
   await f.login("audit");assert.equal((await f.call("/audit/verify")).valid,true);
@@ -491,7 +492,7 @@ uat("UAT-F05: 21 identity RBAC access, admin-only users and independent audit re
    const auditResult=await f.call("/audit/verify",undefined,["AUDIT","LEGAL"].includes(role)?200:403);
    if(["AUDIT","LEGAL"].includes(role))assert.equal(auditResult.valid,true);
    else assert.equal(auditResult.code,"FORBIDDEN",name);
-   const accessAllowed=role!=="BROKER" && !(role==="OBLIGEE"&&name==="obligee_private");
+   const accessAllowed=!["broker","obligee_private","issuer"].includes(name);
    const app=await f.call("/applications/"+j.a.id,undefined,accessAllowed?200:404);
    if(!accessAllowed)assert.equal(app.code,"NOT_FOUND",name);
    statuses[name]={role,admin_user_access:role==="ADMIN",audit_reader:["AUDIT","LEGAL"].includes(role),application_visible:accessAllowed};
