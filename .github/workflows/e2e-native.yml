@@ -8,6 +8,7 @@ on:
     paths:
       - 'tests/uat-enterprise.test.mjs'
       - 'scripts/browser_smoke.cjs'
+      - 'scripts/browser-business-uat.cjs'
       - 'scripts/native-runtime-check.mjs'
       - '.github/workflows/e2e-native.yml'
       - 'cloudflare/**'
@@ -40,6 +41,9 @@ jobs:
         run: node frontend/node_modules/playwright/cli.js install chromium --with-deps --only-shell
       - name: Exercise browser user journeys and role menus on isolated SQLite
         run: BG_WEB_RUNTIME=native node scripts/browser_smoke.cjs
+      - name: Exercise full BG business transitions via browser action buttons
+        if: success() || failure()
+        run: node scripts/browser-business-uat.cjs
       - name: Exercise durable persistence, concurrency, CSRF and rate limits
         if: success() || failure()
         run: node scripts/native-runtime-check.mjs
@@ -53,4 +57,5 @@ jobs:
             evidence/native-runtime.json
             evidence/enterprise-uat-20261031.json
             evidence/button-role-uat.json
+            evidence/browser-business-uat.json
           if-no-files-found: ignore
