@@ -28,10 +28,10 @@ async function main(){
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(base);await page.getByRole('heading',{name:'Masuk ke ruang kerja'}).waitFor();await page.screenshot({path:path.join(qa,'login-desktop.png'),fullPage:true});checks.push('desktop_login_render');
   await login(page,'principal');await page.screenshot({path:path.join(qa,'dashboard-desktop.png'),fullPage:true});checks.push('principal_login');
-  await page.getByRole('button',{name:'＋ Pengajuan baru'}).click();const projectName='Browser UAT '+Date.now();await page.getByLabel('Nama proyek',{exact:true}).fill(projectName);await page.getByLabel('Nominal IDR').fill('2000000000');
-  const expiry=new Date();expiry.setDate(expiry.getDate()+100);await page.getByLabel('Akhir masa berlaku').fill(expiry.toISOString().slice(0,10));
+  await page.getByRole('button',{name:'＋ Pengajuan baru'}).click();const projectName='Browser UAT '+Date.now();await page.getByLabel('Nama proyek / pekerjaan',{exact:true}).fill(projectName);await page.getByLabel('Nilai Bank Garansi (IDR)').fill('2000000000');
+  const expiry=new Date();expiry.setDate(expiry.getDate()+100);await page.getByLabel('Berakhirnya Bank Garansi').fill(expiry.toISOString().slice(0,10));
   await page.getByRole('button',{name:'Simpan draft pengajuan'}).click();await page.getByRole('heading',{name:'Ringkasan Bank Garansi'}).waitFor();checks.push('create_draft_through_ui');
-  await page.getByLabel('Referensi sumber',{exact:true}).fill('OSS sandbox browser UAT');await page.getByLabel('Berkas teks atau PDF').setInputFiles({name:'nib.txt',mimeType:'text/plain',buffer:Buffer.from('NIB fixture browser 1234567890123')});await page.getByRole('button',{name:'Unggah dokumen',exact:true}).click();await page.getByRole('status').filter({hasText:'Bukti tersimpan'}).waitFor();checks.push('evidence_upload_through_ui');
+  await page.getByLabel('Referensi berkas (opsional saat unggah)',{exact:true}).fill('OSS sandbox browser UAT');await page.getByLabel('File PDF, JPG, PNG atau TXT').setInputFiles({name:'nib.txt',mimeType:'text/plain',buffer:Buffer.from('NIB fixture browser 1234567890123')});await page.getByRole('button',{name:'Unggah dokumen',exact:true}).click();await page.getByRole('status').filter({hasText:'Bukti tersimpan'}).waitFor();checks.push('evidence_upload_through_ui');
   await logout(page);await login(page,'compliance');await page.getByRole('row').filter({hasText:projectName}).getByRole('button',{name:'Buka →'}).click();
   page.once('dialog',dialog=>dialog.accept('Sumber primer sandbox diverifikasi petugas berbeda'));
   await page.getByRole('button',{name:'Verifikasi',exact:true}).first().click();await page.waitForFunction(()=>document.querySelectorAll('.document .badge').length>0&&![...document.querySelectorAll('.document .badge')].some(x=>x.textContent==='Pending'));checks.push('independent_document_verification');
@@ -63,7 +63,7 @@ async function main(){
   await mobile.getByRole('button',{name:'Buka atau tutup menu'}).click();await mobile.getByRole('button',{name:'Pengajuan',exact:false}).filter({hasText:'Pengajuan'}).first().click();
   await mobile.waitForFunction(()=>{const el=document.querySelector('.sidebar');return !el.classList.contains('open')&&new DOMMatrix(getComputedStyle(el).transform).m41<=-249});
   await mobile.screenshot({path:path.join(qa,'dashboard-mobile.png'),fullPage:true});checks.push('android_viewport_393_no_overflow');
-  await mobile.getByRole('button',{name:'＋ Pengajuan baru'}).click();await mobile.getByLabel('Akhir masa berlaku').scrollIntoViewIfNeeded();assert(await mobile.getByLabel('Akhir masa berlaku').isVisible());assert(await mobile.evaluate(()=>document.documentElement.scrollWidth<=393&&document.querySelector('.main-shell').getBoundingClientRect().width<=393));checks.push('mobile_long_form_usable');
+  await mobile.getByRole('button',{name:'＋ Pengajuan baru'}).click();await mobile.getByLabel('Berakhirnya Bank Garansi').scrollIntoViewIfNeeded();assert(await mobile.getByLabel('Berakhirnya Bank Garansi').isVisible());assert(await mobile.evaluate(()=>document.documentElement.scrollWidth<=393&&document.querySelector('.main-shell').getBoundingClientRect().width<=393));checks.push('mobile_long_form_usable');
   if(native){
     await login(page,'admin');await page.getByRole('button',{name:/Pengguna$/}).click();
     const username='native_user_'+Date.now(),initialPassword='Native-test-'+crypto.randomUUID();
