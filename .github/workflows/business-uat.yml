@@ -1,0 +1,49 @@
+name: BG business transitions and role authorization UAT
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - test/uat-business-transitions-20261031
+  pull_request:
+    paths:
+      - 'scripts/business-uat-matrix.mjs'
+      - '.github/workflows/business-uat.yml'
+      - 'cloudflare/**'
+jobs:
+  business-uat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Create disposable identities
+        run: |
+          node --experimental-strip-types scripts/provision_native.mjs
+          mkdir -p runtime evidence
+          cp runtime/native-live/credentials.json runtime/sandbox-credentials.json
+          node -e "const fs=require('fs');const s=JSON.parse(fs.readFileSync('runtime/native-live/cloudflare-secrets.json'));fs.writeFileSync('runtime/native-test.env','BG_INITIAL_USERS='+String.fromCharCode(39)+s.BG_INITIAL_USERS+String.fromCharCode(39)+'\nBG_ENCRYPTION_KEY='+s.BG_ENCRYPTION_KEY+'\nBG_MODE=SANDBOX\n',{mode:0o600})"
+      - name: Build native runtime
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build:cloudflare
+      - name: Run role and business transition matrix
+        run: node scripts/business-uat-matrix.mjs
+      - name: Run persistence, security, and accounting guards
+        if: success() || failure()
+        run: node scripts/native-runtime-check.mjs
+      - name: Upload sanitized UAT evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bg-business-uat-evidence
+          path: |
+            evidence/business-uat.json
+            evidence/native-runtime.json
+          if-no-files-found: ignore
