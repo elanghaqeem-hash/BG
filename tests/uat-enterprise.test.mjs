@@ -521,3 +521,45 @@ uat("UAT-F06: failed/replayed payment and claim commands leave journal counts un
   await f.login("audit");assert.equal((await f.call("/audit/verify")).valid,true);
  }finally{f.sqlite.close();}
 });
+
+
+uat("UAT-F07: paid bank claim cannot be withdrawn or removed from aggregate exposure",async()=>{
+ const f=fixture(),j=new Journey(f);
+ try{
+  await j.active();
+  let c=await j.claim();
+  c=await j.claimcmd(c,"report","mpo");
+  c=await j.claimcmd(c,"approve_claim","mpo",{instrument_conditions_met:true});
+  c=await j.claimcmd(c,"pay_bank","finance");
+  const doc=await j.doc("WITHDRAWAL","obligee");
+  const beforeJournals=new Store(f.db).rows("journals").length;
+  const result=await j.claimcmd(c,"withdraw","obligee",{document:doc},409);
+  assert.equal(result.code,"CLAIM");
+  const persisted=new Store(f.db).get("claims",c.id);
+  assert.equal(persisted.state,"CLAIM_PAID_BY_BANK");
+  assert.ok(persisted.bank_paid_at);
+  assert.equal(new Store(f.db).rows("journals").length,beforeJournals);
+  const claimDocument=await j.doc("CLAIM","obligee");
+  await f.login("obligee");
+  const excess=await f.call("/applications/"+j.a.id+"/claims",
+    {document:claimDocument,amount:"1950000000"},422);
+  assert.equal(excess.code,"CLAIM_LIMIT");
+  await f.login("audit");
+  assert.equal((await f.call("/audit/verify")).valid,true);
+ }finally{f.sqlite.close();}
+});
+
+uat("UAT-F08: legitimate pre-payout withdrawal closes pending reporting task",async()=>{
+ const f=fixture(),j=new Journey(f);
+ try{
+  await j.active();
+  let c=await j.claim();
+  const doc=await j.doc("WITHDRAWAL","obligee");
+  c=await j.claimcmd(c,"withdraw","obligee",{document:doc});
+  assert.equal(c.state,"WITHDRAWN");
+  assert.equal(new Store(f.db).get("tasks","report:"+c.id).status,"DONE");
+  assert.equal((await j.claimcmd(c,"withdraw","obligee",{document:doc},409)).code,"STATE");
+  assert.equal(new Store(f.db).rows("journals").filter(r=>r.id==="claim:"+c.id).length,0);
+  await f.login("audit");assert.equal((await f.call("/audit/verify")).valid,true);
+ }finally{f.sqlite.close();}
+});
