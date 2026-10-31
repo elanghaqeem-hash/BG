@@ -617,6 +617,9 @@ export class Service {
           "DRAFT_BG",
           "FORMAT_APPROVAL",
           "CERTIFICATE",
+          "CONTRA_CLAIM",
+          "CONTRA_DECISION",
+          "CONTRA_PAYMENT",
         ].includes(d.kind),
       );
     }
@@ -1593,6 +1596,9 @@ export class Service {
         "DRAFT_BG",
         "FORMAT_APPROVAL",
         "CERTIFICATE",
+        "CONTRA_CLAIM",
+        "CONTRA_DECISION",
+        "CONTRA_PAYMENT",
       ],
       OBLIGEE: ["BG", "CLAIM", "WITHDRAWAL", "DELIVERY"],
       BROKER: BROKER_VISIBLE_DOCUMENT_KINDS,
