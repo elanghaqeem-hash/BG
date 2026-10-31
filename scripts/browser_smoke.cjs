@@ -36,7 +36,7 @@ async function main(){
   page.once('dialog',dialog=>dialog.accept('Sumber primer sandbox diverifikasi petugas berbeda'));
   await page.getByRole('button',{name:'Verifikasi',exact:true}).first().click();await page.waitForFunction(()=>document.querySelectorAll('.document .badge').length>0&&![...document.querySelectorAll('.document .badge')].some(x=>x.textContent==='Pending'));checks.push('independent_document_verification');
   await logout(page);
-  for(const role of ['mpo','penjamin','obligee','broker']){await login(page,role);assert(await page.getByRole('button',{name:'Keluar',exact:true}).isVisible());checks.push(role+'_portal');await logout(page)}
+  // Portal availability for all roles is checked in the subsequent 21-identity sweep; avoid duplicate logins that trigger the 30/min safety limiter.
   // Read-only navigation sweep for every seeded identity. Mutating controls are
   // covered by isolated domain tests, not indiscriminately clicked in a live bank.
   const allRoles=['principal','ao','analyst','compliance','mpo','issuer','support','gh','direksi','finance','finance_checker','penjamin','obligee','obligee_private','broker','litigation','legal','audit','admin','config_checker','worker'];
@@ -74,6 +74,10 @@ async function main(){
     }
     roleMenus[role]=labels;
     checks.push('role_navigation_'+role);
+    if(['mpo','penjamin','obligee','broker'].includes(role)){
+      assert(await page.getByRole('button',{name:'Keluar',exact:true}).isVisible());
+      checks.push(role+'_portal');
+    }
     await logout(page);
   }
   fs.writeFileSync(path.join(qa,'role-menus.json'),JSON.stringify(roleMenus,null,2));
