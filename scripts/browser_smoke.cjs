@@ -37,6 +37,26 @@ async function main(){
   await page.getByRole('button',{name:'Verifikasi',exact:true}).first().click();await page.waitForFunction(()=>document.querySelectorAll('.document .badge').length>0&&![...document.querySelectorAll('.document .badge')].some(x=>x.textContent==='Pending'));checks.push('independent_document_verification');
   await logout(page);
   for(const role of ['mpo','penjamin','obligee','broker']){await login(page,role);assert(await page.getByRole('button',{name:'Keluar',exact:true}).isVisible());checks.push(role+'_portal');await logout(page)}
+  // Read-only navigation sweep for every seeded identity. Mutating controls are
+  // covered by isolated domain tests, not indiscriminately clicked in a live bank.
+  const allRoles=['principal','ao','analyst','compliance','mpo','issuer','support','gh','direksi','finance','finance_checker','penjamin','obligee','obligee_private','broker','litigation','legal','audit','admin','config_checker','worker'];
+  const roleMenus={};
+  for(const role of allRoles){
+    await login(page,role);
+    const nav=page.locator('aside nav[aria-label="Menu utama"] button');
+    const count=await nav.count();assert(count>0,role+' has no navigation');
+    const labels=[];
+    for(let i=0;i<count;i++){
+      const item=nav.nth(i),name=(await item.innerText()).trim();
+      await item.click();
+      await page.locator('.topbar strong').filter({hasText:name.replace(/\\d+$/,'').trim()}).waitFor({timeout:10000});
+      labels.push(name);
+    }
+    roleMenus[role]=labels;
+    checks.push('role_navigation_'+role);
+    await logout(page);
+  }
+  fs.writeFileSync(path.join(qa,'role-menus.json'),JSON.stringify(roleMenus,null,2));
   await page.goto(base+'/verify/fake-token');await page.getByRole('heading',{name:'BG tidak ditemukan atau tidak valid'}).waitFor();checks.push('fake_qr_browser');
   const mobileContext=await browser.newContext({viewport:{width:393,height:852},isMobile:true,hasTouch:true,deviceScaleFactor:2}),mobile=await mobileContext.newPage();
   await login(mobile,'principal');assert(await mobile.evaluate(()=>document.documentElement.scrollWidth<=393&&document.querySelector('.main-shell').getBoundingClientRect().width<=393));
