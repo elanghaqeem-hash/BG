@@ -563,3 +563,32 @@ uat("UAT-F08: legitimate pre-payout withdrawal closes pending reporting task",as
   await f.login("audit");assert.equal((await f.call("/audit/verify")).valid,true);
  }finally{f.sqlite.close();}
 });
+
+
+uat("UAT-F09: counter guarantor can read own contra workflow evidence but never bank SLIK/MKP",async()=>{
+ const f=fixture(),j=new Journey(f);
+ try{
+  await j.active();
+  let c=await j.claim();
+  c=await j.claimcmd(c,"report","mpo");
+  c=await j.claimcmd(c,"approve_claim","mpo",{instrument_conditions_met:true});
+  c=await j.claimcmd(c,"pay_bank","finance");
+  const contra=await j.doc("CONTRA_CLAIM","mpo");
+  c=await j.claimcmd(c,"submit_contra","mpo",{document:contra});
+  const decision=await j.doc("CONTRA_DECISION","penjamin");
+  const paid=await j.doc("CONTRA_PAYMENT","penjamin");
+  await f.login("penjamin");
+  const app=await f.call("/applications/"+j.a.id);
+  const visible=app.documents.map(d=>d.kind);
+  for(const kind of ["CONTRA_CLAIM","CONTRA_DECISION","CONTRA_PAYMENT"])
+   assert.ok(visible.includes(kind),"Penjamin must see "+kind);
+  for(const kind of ["SLIK","MKP","LAPORAN_KEUANGAN"])
+   assert.ok(!visible.includes(kind),"Bank-only evidence leaked: "+kind);
+  for(const id of [contra,decision,paid])assert.match(await f.call("/documents/"+id+"/download"),/Bukti sandbox/);
+  const bankOnly=j.a.documents.find(x=>x.kind==="MKP")?.id;
+  assert.ok(bankOnly);
+  const refused=await f.call("/documents/"+bankOnly+"/download",undefined,403);
+  assert.equal(refused.code,"FORBIDDEN");
+  await f.login("audit");assert.equal((await f.call("/audit/verify")).valid,true);
+ }finally{f.sqlite.close();}
+});
