@@ -1479,12 +1479,25 @@ export class Service {
         );
         this.finishTask("contra-pay:" + c.id);
         break;
-      case "withdraw":
+      case "withdraw": {
         this.role(actor, ["OBLIGEE"]);
+        // An already-paid claim remains an outstanding financial obligation.
+        // Letting it become WITHDRAWN would remove it from the aggregate
+        // claim-limit calculation and enable duplicate exposure.
+        req(
+          !c.bank_paid_at && !c.contra_payment,
+          "CLAIM",
+          "Klaim yang telah dibayar tidak dapat dicabut",
+          409,
+        );
+        this.state(c, "CLAIM_RECEIVED", "CLAIM_VALIDATION", "CLAIM_APPROVED");
         this.doc(a, x.document, "WITHDRAWAL");
         c.withdrawn_at = this.iso;
         c.state = "WITHDRAWN";
+        const reportTask = this.s.maybe("tasks", "report:" + c.id);
+        if (reportTask?.status === "OPEN") this.finishTask("report:" + c.id);
         break;
+      }
       case "refer_dispute":
         this.role(actor, ["LEGAL", ...OPS]);
         this.doc(a, x.document, "DISPUTE");
